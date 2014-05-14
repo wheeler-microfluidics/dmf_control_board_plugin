@@ -1,14 +1,5 @@
+.pydevproject
+.project
+.gitignore
 *.tar.gz
-src/build
-src/docs
-build/*
-src/*.o
-.sconsign.dblite
-*.pyc
-version.txt
-*.hex
-*.elf
-*.dll
-*.pyd
-*.so
 *.yml

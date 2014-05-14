@@ -1,3 +1,0 @@
-[submodule "site_scons/site_tools/doxygen"]
-	path = site_scons/site_tools/doxygen
-	url = http://microfluidics.utoronto.ca/git/doxygen___scons_tool.git

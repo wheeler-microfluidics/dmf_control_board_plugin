@@ -34,7 +34,7 @@ import matplotlib.mlab as mlab
 if os.name == 'nt':
     matplotlib.rc('font', **{'family': 'sans-serif', 'sans-serif': ['Arial']})
 from matplotlib.figure import Figure
-from path import path
+from path_helpers import path
 import scipy.optimize as optimize
 
 from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
@@ -52,7 +52,7 @@ from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 
-from ..dmf_control_board import FeedbackCalibration
+from dmf_control_board import FeedbackCalibration
 
 
 class AmplifierGainNotCalibrated(Exception):
@@ -227,7 +227,7 @@ class FeedbackOptionsController():
         app = get_app()
         self.builder.add_from_file(
             path(app.config['plugins']['directory'])
-            .joinpath('dmf_control_board', 'microdrop', 'glade',
+            .joinpath('dmf_control_board', 'glade',
                       'feedback_options.glade'))
         self.window = self.builder.get_object("window")
         self.builder.connect_signals(self)
@@ -1286,7 +1286,7 @@ class FeedbackResultsController():
         app = get_app()
         self.builder.add_from_file(
             path(app.config['plugins']['directory'])
-            .joinpath('dmf_control_board', 'microdrop', 'glade',
+            .joinpath('dmf_control_board', 'glade',
                       'feedback_results.glade'))
         self.window = self.builder.get_object("window")
         self.combobox_x_axis = self.builder.get_object("combobox_x_axis")
