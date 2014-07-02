@@ -224,11 +224,9 @@ class FeedbackOptionsController():
     def __init__(self, plugin):
         self.plugin = plugin
         self.builder = gtk.Builder()
-        app = get_app()
-        self.builder.add_from_file(
-            path(app.config['plugins']['directory'])
-            .joinpath('dmf_control_board', 'glade',
-                      'feedback_options.glade'))
+        self.builder.add_from_file(path(__file__).parent
+                                   .joinpath('glade',
+                                             'feedback_options.glade'))
         self.window = self.builder.get_object("window")
         self.builder.connect_signals(self)
         self.window.set_title("Feedback Options")
@@ -1284,10 +1282,9 @@ class FeedbackResultsController():
         self.plugin = plugin
         self.builder = gtk.Builder()
         app = get_app()
-        self.builder.add_from_file(
-            path(app.config['plugins']['directory'])
-            .joinpath('dmf_control_board', 'glade',
-                      'feedback_results.glade'))
+        self.builder.add_from_file(path(__file__).parent
+                                   .joinpath('glade',
+                                             'feedback_results.glade'))
         self.window = self.builder.get_object("window")
         self.combobox_x_axis = self.builder.get_object("combobox_x_axis")
         self.combobox_y_axis = self.builder.get_object("combobox_y_axis")
