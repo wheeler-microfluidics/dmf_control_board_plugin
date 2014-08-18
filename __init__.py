@@ -120,7 +120,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Boolean.named('feedback_enabled').using(default=True, optional=True),
     )
     _feedback_fields = set(['feedback_enabled'])
-    
+
     version = get_plugin_info(path(__file__).parent).version
 
     def __init__(self):
@@ -245,7 +245,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             app_values = self.get_app_values()
             reconnect = False
 
-            if(self.control_board.connected() and self.control_board.baud_rate
+            if (self.control_board.connected() and self.control_board.baud_rate
                     != app_values['baud_rate']):
                 self.control_board.baud_rate = app_values['baud_rate']
                 reconnect = True
