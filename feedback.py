@@ -52,21 +52,12 @@ from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 
-from dmf_control_board import FeedbackCalibration
+from dmf_control_board import FeedbackCalibration, FeedbackResults, \
+    FeedbackResultsSeries
 
 
 class AmplifierGainNotCalibrated(Exception):
     pass
-
-
-def feedback_signal(p, frequency, Z, hw_version):
-    """p[0]=C, p[1]=R"""
-    if hw_version.major == 1:
-        return np.abs(1 / (Z / p[1] + 1 + Z * 2 * np.pi * p[0] * complex(0, 1)
-                           * frequency))
-    else:
-        return np.abs(1 / (Z / p[1] + Z * 2 * np.pi * p[0] * complex(0, 1) *
-                           frequency))
 
 
 class RetryAction():
@@ -321,24 +312,24 @@ class FeedbackOptionsController():
         emit_signal("set_voltage", voltage, interface=IWaveformGenerator)
         app_values = self.plugin.get_app_values()
         test_options = deepcopy(dmf_options)
-        test_options.duration = 10 * app_values['sampling_time_ms']
+        test_options.duration = 5 * app_values['sampling_window_ms']
         test_options.feedback_options = FeedbackOptions(
             feedback_enabled=True, action=RetryAction())
         self.plugin.check_impedance(test_options)
-        (V_hv, hv_resistor, V_fb, fb_resistor) = \
-            self.plugin.control_board.measure_impedance(
-                app_values['sampling_time_ms'],
+        results = self.plugin.control_board.measure_impedance(
+                app_values['sampling_window_ms'],
                 int(math.ceil(test_options.duration /
-                              app_values['sampling_time_ms'])),
-                app_values['delay_between_samples_ms'], state)
-        results = FeedbackResults(test_options, app_values['sampling_time_ms'],
-                                  app_values['delay_between_samples_ms'], V_hv,
-                                  hv_resistor, V_fb, fb_resistor, area,
-                                  self.plugin.control_board.calibration, 0)
-        logging.info('max(results.capacitance())/area=%s' %
-                     (max(results.capacitance()) / area))
+                app_values['sampling_window_ms'])), 0,
+                app_values['interleave_feedback_samples'],
+                app_values['use_rms'],
+                state)
+        
+        normalized_capacitance = np.mean(np.max(np.ma.masked_invalid(
+            results.capacitance() / area)))
+        logging.info('mean(results.capacitance())/area=%s' %
+                     normalized_capacitance)
         self.plugin.control_board.state_of_all_channels = current_state
-        return max(results.capacitance()) / area
+        return normalized_capacitance
 
     def on_button_feedback_enabled_toggled(self, widget, data=None):
         """
@@ -855,430 +846,6 @@ class FeedbackOptionsController():
             widget.set_text(str(options.action.channels))
 
 
-class FeedbackResults():
-    """
-    This class stores the impedance results for a single step in the protocol.
-    """
-    class_version = str(Version(0, 3))
-
-    def __init__(self, options, sampling_time_ms, delay_between_samples_ms,
-                 V_hv, hv_resistor, V_fb, fb_resistor, area, calibration,
-                 attempt):
-        self.options = options
-        self.area = area
-        self.frequency = options.frequency
-        self.V_hv = V_hv
-        self.hv_resistor = hv_resistor
-        self.V_fb = V_fb
-        self.fb_resistor = fb_resistor
-        self.time = (np.arange(0, math.ceil(options.duration /
-                                           (sampling_time_ms +
-                                            delay_between_samples_ms))) *
-                     (sampling_time_ms + delay_between_samples_ms))
-        self.calibration = calibration
-        attempt = attempt
-        self.version = self.class_version
-
-    def _upgrade(self):
-        """
-        Upgrade the serialized object if necessary.
-
-        Raises:
-            FutureVersionError: file was written by a future version of the
-                software.
-        """
-        logging.debug('[FeedbackResults]._upgrade()')
-        if hasattr(self, 'version'):
-            version = Version.fromstring(self.version)
-        else:
-            version = Version(0)
-        logging.debug('[FeedbackResults] version=%s, class_version=%s' %
-                      (str(version), self.class_version))
-        if version > Version.fromstring(self.class_version):
-            logging.debug('[FeedbackResults] version>class_version')
-            raise FutureVersionError(Version.fromstring(self.class_version),
-                                     version)
-        elif version < Version.fromstring(self.class_version):
-            if version < Version(0, 1):
-                self.calibration = FeedbackCalibration()
-            if version < Version(0, 2):
-                # flag invalid data points
-                self.version = str(Version(0, 2))
-                self.fb_resistor[self.V_fb > 5] = -1
-                self.hv_resistor[self.V_hv > 5] = -1
-            if version < Version(0, 3):
-                self.attempt = 0
-                self.version = str(Version(0,    3))
-                logging.info('[FeedbackResults] upgrade to version %s' %
-                             self.version)
-        else:
-            # Else the versions are equal and don't need to be upgraded.
-            pass
-
-    def __setstate__(self, state):
-        # convert lists to numpy arrays
-        self.__dict__ = state
-        for k, v in self.__dict__.items():
-            if isinstance(v, list):
-                self.__dict__[k] = np.array(v)
-        self._upgrade()
-
-    def __getstate__(self):
-        # convert numpy arrays/floats to standard lists/floats
-        out = deepcopy(self.__dict__)
-        for k, v in out.items():
-            if isinstance(v, np.ndarray):
-                out[k] = v.tolist()
-        return out
-
-    def V_total(self):
-        ind = mlab.find(self.hv_resistor != -1)
-        T = np.zeros(self.hv_resistor.shape)
-        T[ind] = feedback_signal([self.calibration.C_hv[self.hv_resistor[ind]],
-                                  self.calibration.R_hv
-                                  [self.hv_resistor[ind]]],
-                                 self.frequency, 10e6,
-                                 self.calibration.hw_version)
-        return self.V_hv / T
-
-    def V_actuation(self):
-        if self.calibration.hw_version.major == 1:
-            return self.V_total() - np.array(self.V_fb)
-        else:
-            return self.V_total()
-
-    def Z_device(self):
-        ind = mlab.find(self.fb_resistor != -1)
-        R_fb = np.zeros(self.fb_resistor.shape)
-        C_fb = np.zeros(self.fb_resistor.shape)
-        R_fb[ind] = self.calibration.R_fb[self.fb_resistor[ind]]
-        C_fb[ind] = self.calibration.C_fb[self.fb_resistor[ind]]
-        if self.calibration.hw_version.major == 1:
-            return (R_fb / np.sqrt(1 + np.square(R_fb * C_fb * self.frequency *
-                                                 2 * math.pi)) *
-                    (self.V_total() / self.V_fb - 1))
-        else:
-            return (R_fb / np.sqrt(1 + np.square(R_fb * C_fb * self.frequency *
-                                                 2 * math.pi)) *
-                    (self.V_total() / self.V_fb))
-
-    def min_impedance(self):
-        return min(self.Z_device())
-
-    def capacitance(self):
-        return 1.0 / (2 * math.pi * self.frequency * self.Z_device())
-
-    def x_position(self):
-        if self.calibration.C_drop:
-            C_drop = self.calibration.C_drop
-        else:
-            C_drop = self.capacitance()[-1] / self.area
-        if self.calibration.C_filler:
-            C_filler = self.calibration.C_filler
-        else:
-            C_filler = 0
-        return ((self.capacitance() / self.area - C_filler) /
-                (C_drop - C_filler) * np.sqrt(self.area))
-
-    def mean_velocity(self, ind=None, threshold=0.95):
-        if ind is None:
-            ind = range(len(self.time))
-        t, dxdt = self.dxdt(ind, threshold)
-        x = self.x_position()
-        ind_stop = ind[mlab.find(dxdt == 0)[0]]
-        dx = x[ind_stop] - x[ind[0]]
-        if max(dxdt > 0) and ind_stop < len(t):
-            dt = t[ind_stop] - t[ind[0]]
-            return dx / dt
-        else:
-            return 0
-
-    def dxdt(self, ind=None, threshold=0.95):
-        if ind is None:
-            ind = range(len(self.time))
-        dt = np.diff(self.time[ind])
-        t = self.time[ind][1:] - (self.time[1] - self.time[0]) / 2.0
-        C = self.capacitance()[ind]
-        dCdt = np.diff(C) / dt
-
-        if self.calibration.C_drop:
-            C_drop = self.calibration.C_drop * self.area
-        else:
-            C_drop = C[-1]
-        if self.calibration.C_filler:
-            C_filler = self.calibration.C_filler * self.area
-        else:
-            C_filler = 0
-
-        # find the time when the capacitance exceeds the specified threshold
-        # (e.g., the drop has stopped moving once it has passed 95% of it's
-        # final value)
-        ind_stop = mlab.find((C[1:] - C_filler) / (C[-1] - C_filler) >
-                             threshold)
-        if len(ind_stop):
-            # set all remaining velocities to 0
-            dCdt[ind_stop[0]:] = 0
-
-        return t, dCdt / (C_drop - C_filler) * np.sqrt(self.area)
-
-
-class SweepFrequencyResults():
-    """
-    This class stores the results for a frequency sweep.
-    """
-    class_version = str(Version(0, 1))
-
-    def __init__(self, options, area, calibration):
-        self.options = options
-        self.area = area
-        self.calibration = calibration
-        self.frequency = []
-        self.V_hv = []
-        self.hv_resistor = []
-        self.V_fb = []
-        self.fb_resistor = []
-        self.version = self.class_version
-
-    def _upgrade(self):
-        """
-        Upgrade the serialized object if necessary.
-
-        Raises:
-            FutureVersionError: file was written by a future version of the
-                software.
-        """
-        logging.debug('[SweepFrequencyResults]._upgrade()')
-        if hasattr(self, 'version'):
-            version = Version.fromstring(self.version)
-        else:
-            version = Version(0)
-        logging.debug('[SweepFrequencyResults] version=%s, class_version=%s' %
-                      (str(version), self.class_version))
-        if version > Version.fromstring(self.class_version):
-            logging.debug('[SweepFrequencyResults] version>class_version')
-            raise FutureVersionError(Version.fromstring(self.class_version),
-                                     version)
-        elif version < Version.fromstring(self.class_version):
-            if version < Version(0, 1):
-                self.calibration = FeedbackCalibration()
-                self.version = str(Version(0, 1))
-                logging.info('[SweepFrequencyResults] upgrade to version %s' %
-                             self.version)
-        else:
-            # Else the versions are equal and don't need to be upgraded.
-            pass
-
-    def __setstate__(self, state):
-        # convert lists to numpy arrays
-        self.__dict__ = state
-        for k, v in self.__dict__.items():
-            if isinstance(v, list) and len(v) and isinstance(v[0], list):
-                for i in range(len(v)):
-                    if isinstance(self.__dict__[k][i], list):
-                        self.__dict__[k][i] = np.array(self.__dict__[k][i])
-            elif isinstance(v, list):
-                self.__dict__[k] = np.array(v)
-        self._upgrade()
-
-    def __getstate__(self):
-        # convert numpy arrays/floats to standard lists/floats
-        out = deepcopy(self.__dict__)
-        for k, v in out.items():
-            if isinstance(v, list):
-                for i in range(len(v)):
-                    if isinstance(out[k][i], np.ndarray):
-                        out[k][i] = out[k][i].tolist()
-                    elif isinstance(out[k][i], np.float64):
-                        out[k][i] = float(out[k][i])
-            elif isinstance(v, np.ndarray):
-                out[k] = v.tolist()
-        return out
-
-    def add_frequency_step(self, frequency,
-                           V_hv, hv_resistor,
-                           V_fb, fb_resistor):
-        self.frequency.append(frequency)
-        self.V_hv.append(V_hv)
-        self.hv_resistor.append(hv_resistor)
-        self.V_fb.append(V_fb)
-        self.fb_resistor.append(fb_resistor)
-
-    def V_total(self):
-        V = []
-        for i in range(0, np.size(self.V_hv, 0)):
-            hv_resistor = np.array(self.hv_resistor[i])
-            ind = mlab.find(hv_resistor != -1)
-            R_hv = np.zeros(hv_resistor.shape)
-            C_hv = np.zeros(hv_resistor.shape)
-            R_hv[ind] = self.calibration.R_hv[hv_resistor[ind]]
-            C_hv[ind] = self.calibration.C_hv[hv_resistor[ind]]
-            T = feedback_signal([C_hv, R_hv], self.frequency[i],
-                                10e6, self.calibration.hw_version)
-            V.append(np.array(self.V_hv[i]) / T)
-        return V
-
-    def V_actuation(self):
-        if self.calibration.hw_version.major == 1:
-            return self.V_total() - np.array(self.V_fb)
-        else:
-            return self.V_total()
-
-    def Z_device(self):
-        Z = []
-        V_total = self.V_total()
-        for i in range(0, np.size(self.V_hv, 0)):
-            fb_resistor = np.array(self.fb_resistor[i])
-            ind = mlab.find(fb_resistor != -1)
-            R_fb = np.zeros(fb_resistor.shape)
-            C_fb = np.zeros(fb_resistor.shape)
-            R_fb[ind] = self.calibration.R_fb[fb_resistor[ind]]
-            C_fb[ind] = self.calibration.C_fb[fb_resistor[ind]]
-            if self.calibration.hw_version.major == 1:
-                Z.append(R_fb /
-                         np.sqrt(1 + np.square(R_fb * C_fb * self.frequency[i]
-                                               * 2 * math.pi)) *
-                         (V_total[i] / self.V_fb[i] - 1))
-            else:
-                Z.append(R_fb / np.sqrt(1 + np.square(R_fb * C_fb *
-                         self.frequency[i] * 2 * math.pi)) *
-                         (V_total[i] / self.V_fb[i]))
-        return Z
-
-    def capacitance(self):
-        frequency = np.reshape(np.array(self.frequency),
-                               (len(self.frequency), 1))
-        frequency = np.repeat(frequency, np.size(self.Z_device(), 1), axis=1)
-        return 1.0 / (2 * math.pi * frequency * self.Z_device())
-
-
-class SweepVoltageResults():
-    """
-    This class stores the results for a frequency sweep.
-    """
-    class_version = str(Version(0, 1))
-
-    def __init__(self, options, area, frequency, calibration):
-        self.options = options
-        self.area = area
-        self.frequency = frequency
-        self.calibration = calibration
-        self.voltage = []
-        self.V_hv = []
-        self.hv_resistor = []
-        self.V_fb = []
-        self.fb_resistor = []
-        self.version = self.class_version
-
-    def _upgrade(self):
-        """
-        Upgrade the serialized object if necessary.
-
-        Raises:
-            FutureVersionError: file was written by a future version of the
-                software.
-        """
-        logging.debug('[SweepVoltageResults]._upgrade()')
-        if hasattr(self, 'version'):
-            version = Version.fromstring(self.version)
-        else:
-            version = Version(0)
-        logging.debug('[SweepVoltageResults] version=%s, class_version=%s' %
-                      (str(version), self.class_version))
-        if version > Version.fromstring(self.class_version):
-            logging.debug('[SweepVoltageResults] version>class_version')
-            raise FutureVersionError(Version.fromstring(self.class_version),
-                                     version)
-        elif version < Version.fromstring(self.class_version):
-            if version < Version(0, 1):
-                self.calibration = FeedbackCalibration()
-                self.version = str(Version(0, 1))
-                logging.info('[SweepVoltageResults] upgrade to version %s' %
-                             self.version)
-        else:
-            # Else the versions are equal and don't need to be upgraded.
-            pass
-
-    def __setstate__(self, state):
-        # convert lists to numpy arrays
-        self.__dict__ = state
-        for k, v in self.__dict__.items():
-            if isinstance(v, list) and len(v) and isinstance(v[0], list):
-                for i in range(len(v)):
-                    if isinstance(self.__dict__[k][i], list):
-                        self.__dict__[k][i] = np.array(self.__dict__[k][i])
-            elif isinstance(v, list):
-                self.__dict__[k] = np.array(v)
-        self._upgrade()
-
-    def __getstate__(self):
-        # convert numpy arrays/floats to standard lists/floats
-        out = deepcopy(self.__dict__)
-        for k, v in out.items():
-            if isinstance(v, list):
-                for i in range(len(v)):
-                    if isinstance(out[k][i], np.ndarray):
-                        out[k][i] = out[k][i].tolist()
-                    elif isinstance(out[k][i], np.float64):
-                        out[k][i] = float(out[k][i])
-            elif isinstance(v, np.ndarray):
-                out[k] = v.tolist()
-        return out
-
-    def add_voltage_step(self, voltage,
-                         V_hv, hv_resistor,
-                         V_fb, fb_resistor):
-        self.voltage.append(voltage)
-        self.V_hv.append(V_hv)
-        self.hv_resistor.append(hv_resistor)
-        self.V_fb.append(V_fb)
-        self.fb_resistor.append(fb_resistor)
-
-    def V_total(self):
-        V = []
-        for i in range(0, np.size(self.V_hv, 0)):
-            hv_resistor = np.array(self.hv_resistor[i])
-            ind = mlab.find(hv_resistor != -1)
-            R_hv = np.zeros(hv_resistor.shape)
-            C_hv = np.zeros(hv_resistor.shape)
-            R_hv[ind] = self.calibration.R_hv[hv_resistor[ind]]
-            C_hv[ind] = self.calibration.C_hv[hv_resistor[ind]]
-            T = feedback_signal([C_hv, R_hv], self.frequency,
-                                10e6, self.calibration.hw_version)
-            V.append(np.array(self.V_hv[i]) / T)
-        return V
-
-    def V_actuation(self):
-        if self.calibration.hw_version.major == 1:
-            return self.V_total() - np.array(self.V_fb)
-        else:
-            return self.V_total()
-
-    def Z_device(self):
-        Z = []
-        V_total = self.V_total()
-        for i in range(0, np.size(self.V_hv, 0)):
-            fb_resistor = np.array(self.fb_resistor[i])
-            ind = mlab.find(fb_resistor != -1)
-            R_fb = np.zeros(fb_resistor.shape)
-            C_fb = np.zeros(fb_resistor.shape)
-            R_fb[ind] = self.calibration.R_fb[fb_resistor[ind]]
-            C_fb[ind] = self.calibration.C_fb[fb_resistor[ind]]
-            if self.calibration.hw_version.major == 1:
-                Z.append(R_fb /
-                         np.sqrt(1 + np.square(R_fb * C_fb * self.frequency * 2
-                                               * math.pi))
-                         * (V_total[i] / self.V_fb[i] - 1))
-            else:
-                Z.append(R_fb /
-                         np.sqrt(1 + np.square(R_fb * C_fb * self.frequency * 2
-                                               * math.pi))
-                         * (V_total[i] / self.V_fb[i]))
-        return Z
-
-    def capacitance(self):
-        return 1.0 / (2 * math.pi * self.frequency * np.array(self.Z_device()))
-
-
 class FeedbackResultsController():
     def __init__(self, plugin):
         self.plugin = plugin
@@ -1403,6 +970,10 @@ class FeedbackResultsController():
         legend = []
         legend_loc = "upper right"
         self.export_data = []
+        experiment_log_controller = get_service_instance_by_name(
+            "microdrop.gui.experiment_log_controller", "microdrop")
+        protocol = experiment_log_controller.results.protocol
+        dmf_device = experiment_log_controller.results.dmf_device
 
         normalization_string = ""
         if self.checkbutton_normalize_by_area.get_active():
@@ -1424,7 +995,7 @@ class FeedbackResultsController():
             self.axis.set_title("Actuation voltage")
             self.axis.set_ylabel("V$_{actuation}$ (V$_{RMS}$)")
             legend_loc = "lower right"
-        elif y_axis == "x - position":
+        elif y_axis == "x-position":
             self.axis.set_title("x-position")
             self.axis.set_ylabel("x-position (mm)")
 
@@ -1435,9 +1006,14 @@ class FeedbackResultsController():
                         row[self.plugin.name].keys()):
                     results = row[self.plugin.name]["FeedbackResults"]
 
+                    state_of_channels = protocol[row['core']["step"]]. \
+                        get_data('microdrop.gui.dmf_device_controller'). \
+                        state_of_channels
+                    area = dmf_device.actuated_area(state_of_channels)
+                    
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        normalization = results.area
+                        normalization = area
 
                     self.export_data.append('step:, %d' % (row['core']["step"]
                                                            + 1))
@@ -1482,7 +1058,7 @@ class FeedbackResultsController():
                                                            .capacitance()[ind]
                                                            / normalization]))
                     elif y_axis == "Velocity":
-                        t, dxdt = results.dxdt(ind)
+                        t, dxdt = results.dxdt(area, ind)
                         self.axis.plot(t, dxdt * 1000)
                         self.export_data.append('time (ms):, ' +
                                                 ", ".join([str(x) for x in t]))
@@ -1500,9 +1076,9 @@ class FeedbackResultsController():
                                                            results
                                                            .V_actuation()
                                                            [ind]]))
-                    elif y_axis == "x - position":
+                    elif y_axis == "x-position":
                         t = results.time[ind]
-                        x_pos = results.x_position()[ind]
+                        x_pos = results.x_position(area)[ind]
                         self.axis.plot(t, x_pos)
                         self.export_data.append('time (ms):, ' +
                                                 ", ".join([str(x) for x in t]))
@@ -1516,13 +1092,21 @@ class FeedbackResultsController():
             self.axis.set_xlabel("Frequency (Hz)")
             self.axis.set_xscale('log')
             for row in self.data:
-                if (self.plugin.name in row.keys() and "SweepFrequencyResults"
+                if (self.plugin.name in row.keys() and "FeedbackResultsSeries"
                         in row[self.plugin.name].keys()):
-                    results = row[self.plugin.name]["SweepFrequencyResults"]
+                    results = row[self.plugin.name]["FeedbackResultsSeries"]
+
+                    if results.xlabel != "Frequency":
+                        continue
+
+                    state_of_channels = protocol[row['core']["step"]]. \
+                        get_data('microdrop.gui.dmf_device_controller'). \
+                        state_of_channels
+                    area = dmf_device.actuated_area(state_of_channels)
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        normalization = results.area
+                        normalization = area
 
                     self.export_data.append('step:, %d' %
                                             (row['core']["step"] + 1))
@@ -1532,75 +1116,75 @@ class FeedbackResultsController():
                                             ", ".join([str(x) for x in
                                                        results.frequency]))
                     if y_axis == "Impedance":
+                        Z = np.ma.masked_invalid(results.Z_device())
                         self.axis.errorbar(results.frequency,
-                                           np.mean(results.Z_device(), 1) /
+                                           np.mean(Z, 1) /
                                            normalization,
-                                           np.std(results.Z_device(), 1) /
+                                           np.std(Z, 1) /
                                            normalization, fmt='.')
                         self.export_data.append('mean(impedance) (Ohms%s):, ' %
                                                 normalization_string +
                                                 ", ".join([str(x) for x in
-                                                           np.mean(results
-                                                                   .Z_device(),
-                                                                   1) /
+                                                           np.mean(Z, 1) /
                                                            normalization]))
                         self.export_data.append('std(impedance) (Ohms%s):, ' %
                                                 normalization_string +
                                                 ", ".join([str(x) for x in
-                                                           np.std(results
-                                                                  .Z_device(),
-                                                                  1) /
+                                                           np.std(Z, 1) /
                                                            normalization]))
                     elif y_axis == "Capacitance":
+                        C = np.ma.masked_invalid(results.capacitance())
                         self.axis.errorbar(results.frequency,
-                                           np.mean(results.capacitance(), 1) /
+                                           np.mean(C, 1) /
                                            normalization,
-                                           np.std(results.capacitance(), 1) /
+                                           np.std(C, 1) /
                                            normalization, fmt='.')
                         self.export_data.append('mean(capacitance) (F):, ' +
                                                 ", "
                                                 .join([str(x) for x in
-                                                       np.mean(results
-                                                               .capacitance() /
+                                                       np.mean(C /
                                                                normalization,
                                                                1)]))
                         self.export_data.append('std(capacitance/area) (F):, '
                                                 + ", "
                                                 .join([str(x) for x in
-                                                       np.std(results
-                                                              .capacitance(),
-                                                              1) /
+                                                       np.std(C, 1) /
                                                        normalization]))
                     elif y_axis == "Voltage":
+                        V = np.ma.masked_invalid(results.V_actuation())
                         self.axis.errorbar(results.frequency,
-                                           np.mean(results.V_actuation(), 1),
-                                           np.std(results.V_actuation(), 1),
+                                           np.mean(V, 1),
+                                           np.std(V, 1),
                                            fmt='.')
                         self.export_data.append('mean(V_actuation) (Vrms):, ' +
                                                 ", "
                                                 .join([str(x) for x in
-                                                       np.mean(results
-                                                               .V_actuation(),
-                                                               1)]))
+                                                       np.mean(V, 1)]))
                         self.export_data.append('std(V_actuation) (Vrms):, ' +
                                                 ", "
                                                 .join([str(x) for x in
-                                                       np.std(results
-                                                              .V_actuation(),
-                                                              1)]))
+                                                       np.std(V, 1)]))
                     legend.append("Step %d (%.3f s)" % (row['core']["step"] +
                                                         1,
                                                         row['core']["time"]))
         elif x_axis == "Voltage":
             self.axis.set_xlabel("Actuation Voltage (V$_{RMS}$)")
             for row in self.data:
-                if (self.plugin.name in row.keys() and "SweepVoltageResults" in
-                        row[self.plugin.name].keys()):
-                    results = row[self.plugin.name]["SweepVoltageResults"]
+                if (self.plugin.name in row.keys() and "FeedbackResultsSeries"
+                        in row[self.plugin.name].keys()):
+                    results = row[self.plugin.name]["FeedbackResultsSeries"]
+
+                    if results.xlabel != "Voltage":
+                        continue
+
+                    state_of_channels = protocol[row['core']["step"]]. \
+                        get_data('microdrop.gui.dmf_device_controller'). \
+                        state_of_channels
+                    area = dmf_device.actuated_area(state_of_channels)
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        normalization = results.area
+                        normalization = area
 
                     self.export_data.append('step:, %d' %
                                             (row['core']["step"] + 1))
@@ -1610,62 +1194,53 @@ class FeedbackResultsController():
                                             ", ".join([str(x) for x in
                                                        results.voltage]))
                     if y_axis == "Impedance":
+                        Z = np.ma.masked_invalid(results.Z_device())
                         self.axis.errorbar(results.voltage,
-                                           np.mean(results.Z_device(), 1) /
+                                           np.mean(Z, 1) /
                                            normalization,
-                                           np.std(results.Z_device(), 1) /
+                                           np.std(Z, 1) /
                                            normalization, fmt='.')
                         self.export_data.append('mean(impedance) (Ohms%s):, ' %
                                                 normalization_string +
                                                 ", ".join([str(x) for x in
-                                                           np.mean(results
-                                                                   .Z_device(),
-                                                                   1) /
+                                                           np.mean(Z, 1) /
                                                            normalization]))
                         self.export_data.append('std(impedance) (Ohms%s):, '
                                                 % normalization_string +
                                                 ", ".join([str(x) for x in
-                                                           np.std(results
-                                                                  .Z_device(),
-                                                                  1) /
+                                                           np.std(Z, 1) /
                                                            normalization]))
                     elif y_axis == "Capacitance":
+                        C = np.ma.masked_invalid(results.capacitance())
                         self.axis.errorbar(results.voltage,
-                                           np.mean(results.capacitance(), 1) /
+                                           np.mean(C, 1) /
                                            normalization,
-                                           np.std(results.capacitance(), 1) /
+                                           np.std(C, 1) /
                                            normalization, fmt='.')
                         self.export_data.append('mean(capacitance) (F):, ' +
                                                 ", "
                                                 .join([str(x) for x in
-                                                       np.mean(results
-                                                               .capacitance(),
-                                                               1) /
+                                                       np.mean(C, 1) /
                                                        normalization]))
                         self.export_data.append('std(capacitance) (F):, ' +
                                                 ", "
                                                 .join([str(x) for x in
-                                                       np.std(results
-                                                              .capacitance(),
-                                                              1) /
+                                                       np.std(C, 1) /
                                                        normalization]))
                     elif y_axis == "Voltage":
+                        V = np.ma.masked_invalid(results.V_actuation())
                         self.axis.errorbar(results.voltage,
-                                           np.mean(results.V_actuation(), 1),
-                                           np.std(results.V_actuation(), 1),
+                                           np.mean(V, 1),
+                                           np.std(V, 1),
                                            fmt='.')
                         self.export_data.append('mean(V_actuation) (Vrms):, ' +
                                                 ", "
                                                 .join([str(x) for x in
-                                                       np.mean(results
-                                                               .V_actuation(),
-                                                               1)]))
+                                                       np.mean(V, 1)]))
                         self.export_data.append('std(V_actuation) (Vrms):, ' +
                                                 ", "
                                                 .join([str(x) for x in
-                                                       np.std(results
-                                                              .V_actuation(),
-                                                              1)]))
+                                                       np.std(V, 1)]))
                     legend.append("Step %d (%.3f s)" % (row['core']["step"] +
                                                         1,
                                                         row['core']["time"]))
@@ -1692,12 +1267,9 @@ class FeedbackCalibrationController():
             if 'FeedbackResults' in selected_data[0][self.plugin.name]:
                 calibration = (selected_data[0][self.plugin.name]
                                ['FeedbackResults'].calibration)
-            elif 'SweepFrequencyResults' in selected_data[0][self.plugin.name]:
+            elif 'FeedbackResultsSeries' in selected_data[0][self.plugin.name]:
                 calibration = (selected_data[0][self.plugin.name]
-                               ['SweepFrequencyResults'].calibration)
-            elif 'SweepVoltageResults' in selected_data[0][self.plugin.name]:
-                calibration = (selected_data[0][self.plugin.name]
-                               ['SweepVoltageResults'].calibration)
+                               ['FeedbackResultsSeries'].calibration)
         except:
             logging.error("This step does not contain any calibration data.")
             return
@@ -1756,12 +1328,9 @@ class FeedbackCalibrationController():
                 if 'FeedbackResults' in row[self.plugin.name]:
                     row[self.plugin.name]['FeedbackResults'].calibration = \
                         deepcopy(calibration)
-                elif 'SweepFrequencyResults' in row[self.plugin.name]:
-                    row[self.plugin.name]['SweepFrequencyResults'].\
+                elif 'FeedbackResultsSeries' in row[self.plugin.name]:
+                    row[self.plugin.name]['FeedbackResultsSeries'].\
                         calibration = deepcopy(calibration)
-                elif 'SweepVoltageResults' in row[self.plugin.name]:
-                    row[self.plugin.name]['SweepVoltageResults'].calibration =\
-                        deepcopy(calibration)
             except:
                 continue
         # save the experiment log with the new values
@@ -1783,20 +1352,15 @@ class FeedbackCalibrationController():
         # Create a list containing the following calibration sections:
         #
         #    * `FeedbackResults`
-        #    * `SweepFrequencyResults`
-        #    * `SweepVoltageResults`
+        #    * `FeedbackResultsSeries`
         for row in selected_data:
             try:
                 if 'FeedbackResults' in row[self.plugin.name]:
                     calibration_list.append(row[self.plugin.name]
                                             ['FeedbackResults'].calibration)
-                elif 'SweepFrequencyResults' in row[self.plugin.name]:
+                elif 'FeedbackResultsSeries' in row[self.plugin.name]:
                     calibration_list.append(row[self.plugin.name]
-                                            ['SweepFrequencyResults']
-                                            .calibration)
-                elif 'SweepVoltageResults' in row[self.plugin.name]:
-                    calibration_list.append(row[self.plugin.name]
-                                            ['SweepVoltageResults']
+                                            ['FeedbackResultsSeries']
                                             .calibration)
             except:
                 # The current row does not contain any results.
@@ -2036,8 +1600,8 @@ bration#high-voltage-attenuation-calibration'''.strip(),
 
         for i, frequency in enumerate(frequencies):
             options.frequency = frequency
-            sampling_time_ms = int(max(1000.0 / frequency * 5, 10))
-            options.duration = 10 * sampling_time_ms
+            sampling_window_ms = int(max(1000.0 / frequency * 5, 10))
+            options.duration = 10 * sampling_window_ms
             emit_signal("set_frequency", frequency,
                         interface=IWaveformGenerator)
             for j in range(0, len(calibration.R_fb)):
@@ -2050,17 +1614,16 @@ bration#high-voltage-attenuation-calibration'''.strip(),
                                 interface=IWaveformGenerator)
                     (v_hv, hv_resistor, v_fb, fb_resistor) = (
                         self.plugin.control_board.measure_impedance(
-                            sampling_time_ms,
+                            sampling_window_ms,
                             int(math.ceil(options.duration /
-                                          sampling_time_ms)),
-                            app_values['delay_between_samples_ms'], state))
+                                          sampling_window_ms)),
+                            app_values['delay_between_windows_ms'], state))
 
-                    results = FeedbackResults(options, sampling_time_ms,
+                    results = FeedbackResults(options, sampling_window_ms,
                                               app_values
-                                              ['delay_between_samples_ms'],
+                                              ['delay_between_windows_ms'],
                                               v_hv, hv_resistor, v_fb,
                                               fb_resistor,
-                                              self.plugin.get_actuated_area(),
                                               self.plugin.control_board
                                               .calibration, 0)
                     logging.info("gain=%.1f" % self.plugin.control_board

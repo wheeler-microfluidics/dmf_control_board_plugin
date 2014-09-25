@@ -3,3 +3,4 @@
 .gitignore
 *.tar.gz
 *.yml
+*.pyc
