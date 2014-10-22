@@ -45,14 +45,12 @@ from microdrop.plugin_manager import (IPlugin, IWaveformGenerator, Plugin,
 from microdrop.app_context import get_app
 from microdrop.dmf_device import DeviceScaleNotSet
 
-from dmf_control_board import DMFControlBoard
+from dmf_control_board import DMFControlBoard, FeedbackResultsSeries
 from serial_device import SerialDevice, get_serial_ports
 from feedback import (FeedbackOptions, FeedbackOptionsController,
                       FeedbackCalibrationController,
                       FeedbackResultsController, RetryAction,
-                      SweepFrequencyAction, SweepFrequencyResults,
-                      SweepVoltageAction, SweepVoltageResults,
-                      FeedbackResults)
+                      SweepFrequencyAction, SweepVoltageAction)
 
 
 PluginGlobals.push_env('microdrop.managed')
@@ -95,12 +93,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         default_port_ = None
 
     AppFields = Form.of(
-        Integer.named('sampling_time_ms').using(default=10, optional=True,
+        Integer.named('sampling_window_ms').using(default=10, optional=True,
                                                 validators=
                                                 [ValueAtLeast(minimum=0), ],),
-        Integer.named('delay_between_samples_ms')
+        Integer.named('delay_between_windows_ms')
         .using(default=0, optional=True, validators=[ValueAtLeast(minimum=0),
                                                      ],),
+        Boolean.named('use_rms').using(default=True, optional=True),
+        Boolean.named('interleave_feedback_samples').using(default=True,
+                                                           optional=True),
         Enum.named('serial_port').using(default=default_port_,
                                         optional=True).valued(*serial_ports_),
         Integer.named('baud_rate')
@@ -120,7 +121,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Boolean.named('feedback_enabled').using(default=True, optional=True),
     )
     _feedback_fields = set(['feedback_enabled'])
-    
+
     version = get_plugin_info(path(__file__).parent).version
 
     def __init__(self):
@@ -245,7 +246,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             app_values = self.get_app_values()
             reconnect = False
 
-            if(self.control_board.connected() and self.control_board.baud_rate
+            if (self.control_board.connected() and self.control_board.baud_rate
                     != app_values['baud_rate']):
                 self.control_board.baud_rate = app_values['baud_rate']
                 reconnect = True
@@ -486,6 +487,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 default=settings['voltage_tolerance'], optional=True,
                 validators=[ValueAtLeast(minimum=0), ]),
         )
+        settings['use_antialiasing_filter'] = \
+            self.control_board.use_antialiasing_filter
+        schema_entries.append(
+            Boolean.named('use_antialiasing_filter').using(
+                default=settings['use_antialiasing_filter'], optional=True, )
+        )
 
         if hardware_version.major == 1:
             settings['WAVEOUT_GAIN_1'] = self.control_board.waveout_gain_1
@@ -566,6 +573,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             .signal_generator_board_i2c_address = v
                     elif k == 'voltage_tolerance':
                         self.control_board.voltage_tolerance = v
+                    elif k == 'use_antialiasing_filter':
+                        self.control_board.use_antialiasing_filter = v
                     elif m:
                         series_resistor = int(m.group(3))
                         if m.group(2) == 'hv':
@@ -619,31 +628,32 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app.main_window_controller.label_control_board_status\
            .set_text(self.connection_status)
 
-    def on_device_impedance_update(self, impedance):
+    def on_device_impedance_update(self, results):
         app = get_app()
         app.main_window_controller.label_control_board_status\
            .set_text(self.connection_status + ", Voltage: %.1f V" %
-                     impedance.V_actuation()[-1])
-        options = impedance.options
-        feedback_options = impedance.options.feedback_options
+                     results.V_actuation()[-1])
 
-        if impedance.V_actuation()[-1] < 5.0:
+        options = self.get_step_options()
+        feedback_options = options.feedback_options
+
+        if results.V_actuation()[-1] < 5.0:
             logger.error("Low voltage detected. Please check that the "
                          "amplifier is on.")
         else:
-            voltage = options.voltage
+            voltage = results.voltage
             if feedback_options.action.__class__ == RetryAction:
                 attempt = app.protocol.current_step_attempt
                 voltage += (feedback_options.action.increase_voltage * attempt)
             logger.info('[DMFControlBoardPlugin]'
                         '.on_device_impedance_update():')
             logger.info('\tset_voltage=%.1f, measured_voltage=%.1f, '
-                        'error=%.1f%%' % (voltage, impedance.V_actuation()[-1],
-                                          100 * (impedance.V_actuation()[-1] -
+                        'error=%.1f%%' % (voltage, results.V_actuation()[-1],
+                                          100 * (results.V_actuation()[-1] -
                                                  voltage) / voltage))
 
             # check that the signal is within tolerance
-            if (abs(impedance.V_actuation()[-1] - voltage) >
+            if (abs(results.V_actuation()[-1] - voltage) >
                     self.control_board.voltage_tolerance):
 
                 # allow maximum of 5 adjustment attempts
@@ -668,20 +678,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
     def get_actuated_area(self):
         app = get_app()
-        if app.dmf_device.scale is None:
-            raise DeviceScaleNotSet()
-        area = 0
-        options = app.dmf_device_controller.get_step_options()
-        state_of_all_channels = options.state_of_channels
-        for id, electrode in app.dmf_device.electrodes.iteritems():
-            channels = app.dmf_device.electrodes[id].channels
-            if channels:
-                # Get the state(s) of the channel(s) connected to this
-                # electrode.
-                states = state_of_all_channels[channels]
-                if len(np.nonzero(states > 0)[0]):
-                    area += electrode.area() * app.dmf_device.scale
-        return area
+        return app.dmf_device.actuated_area(
+            app.dmf_device_controller.get_step_options().state_of_channels)
 
     def on_step_run(self):
         """
@@ -744,10 +742,13 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                             interface=IWaveformGenerator)
                                 self.check_impedance(options)
                             self.control_board.measure_impedance_non_blocking(
-                                app_values['sampling_time_ms'],
-                                int(math.ceil(options.duration /
-                                              app_values['sampling_time_ms'])),
-                                app_values['delay_between_samples_ms'],
+                                app_values['sampling_window_ms'],
+                                int(math.ceil(options.duration / (
+                                              app_values['sampling_window_ms'] + 
+                                              app_values['delay_between_windows_ms']))),
+                                app_values['delay_between_windows_ms'],
+                                app_values['interleave_feedback_samples'],
+                                app_values['use_rms'],
                                 state)
                             logger.debug('[DMFControlBoardPlugin] on_step_run:'
                                          ' timeout_add(%d, '
@@ -767,9 +768,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             int(feedback_options.action.n_frequency_steps)
                         ).tolist()
                         voltage = options.voltage
-                        results = SweepFrequencyResults(feedback_options, area,
-                                                        self.control_board
-                                                        .calibration)
+                        results = FeedbackResultsSeries('Frequency')
                         emit_signal("set_voltage", voltage,
                                     interface=IWaveformGenerator)
                         test_options = deepcopy(options)
@@ -794,10 +793,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             emit_signal("set_frequency", frequency,
                                         interface=IWaveformGenerator)
                             self.check_impedance(options)
-                        results = SweepVoltageResults(feedback_options, area,
-                                                      frequency,
-                                                      self.control_board
-                                                      .calibration)
+                        results = FeedbackResultsSeries('Voltage')
                         test_options = deepcopy(options)
                         self._callback_sweep_voltage(test_options,
                                                      results,
@@ -844,21 +840,14 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         if plugin_name == self.name:
             self.timeout_id = None
 
-    def get_impedance_data(self, options):
+    def get_impedance_data(self):
         """
         This function wraps the control_board.get_impedance_data() function
         and sends an on_device_impedance_update.
         """
         app_values = self.get_app_values()
-        (V_hv, hv_resistor, V_fb, fb_resistor) = \
-            self.control_board.get_impedance_data()
-        results = FeedbackResults(options, app_values['sampling_time_ms'],
-                                  app_values['delay_between_samples_ms'], V_hv,
-                                  hv_resistor, V_fb, fb_resistor,
-                                  self.get_actuated_area(),
-                                  self.control_board.calibration, 0)
-        emit_signal("on_device_impedance_update", results)
-        return (V_hv, hv_resistor, V_fb, fb_resistor)
+        results = self.control_board.get_impedance_data()
+        return results
 
     def _kill_running_step(self):
         if self.timeout_id:
@@ -878,31 +867,30 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app_values = self.get_app_values()
         area = self.get_actuated_area()
         return_value = None
-        (V_hv, hv_resistor, V_fb, fb_resistor) = \
-            self.get_impedance_data(options)
-        results = FeedbackResults(options, app_values['sampling_time_ms'],
-                                  app_values['delay_between_samples_ms'], V_hv,
-                                  hv_resistor, V_fb, fb_resistor, area,
-                                  self.control_board.calibration,
-                                  app.protocol.current_step_attempt)
+        results = self.get_impedance_data()
         logger.debug("V_actuation=%s" % results.V_actuation())
         logger.debug("Z_device=%s" % results.Z_device())
         app.experiment_log.add_data({"FeedbackResults": results}, self.name)
+        
+        normalized_capacitance = np.ma.masked_invalid(results.capacitance() / 
+            area)
+        
         if (self.control_board.calibration.C_drop and
-                max(results.capacitance()) / area <
+                np.max(normalized_capacitance) < 
                 options.feedback_options.action.percent_threshold / 100.0 *
                 self.control_board.calibration.C_drop):
             logger.info('step=%d: attempt=%d, max(C)/A=%.1e F/mm^2. Repeat' %
                         (app.protocol.current_step_number,
                          app.protocol.current_step_attempt,
-                         max(results.capacitance()) / area))
+                         np.max(normalized_capacitance)))
             # signal that the step should be repeated
             return_value = 'Repeat'
         else:
             logger.info('step=%d: attempt=%d, max(C)/A=%.1e F/mm^2. OK' %
                         (app.protocol.current_step_number,
                          app.protocol.current_step_attempt,
-                         max(results.capacitance()) / area))
+                         np.max(normalized_capacitance)))
+            emit_signal("on_device_impedance_update", results)
         self.step_complete(return_value)
         return False  # Stop the timeout from refiring
 
@@ -913,18 +901,14 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app = get_app()
         app_values = self.get_app_values()
 
-        # if this isn'g the first call, we need to retrieve the data from the
+        # if this isn't the first call, we need to add the data from the
         # previous call
         if not first_call:
             frequency = frequencies.pop(0)
-            (V_hv, hv_resistor, V_fb, fb_resistor) = (
-                self.get_impedance_data(options))
-            results.add_frequency_step(frequency, V_hv, hv_resistor, V_fb,
-                                       fb_resistor)
-            app.experiment_log.add_data({"SweepFrequencyResults": results},
-                                        self.name)
-            logger.debug("V_actuation=%s" % results.V_actuation())
-            logger.debug("Z_device=%s" % results.Z_device())
+            data = self.get_impedance_data()
+            results.add_data(frequency, data)
+            logger.debug("V_actuation=%s" % data.V_actuation())
+            logger.debug("Z_device=%s" % data.Z_device())
 
         # if there are frequencies left to sweep
         if len(frequencies):
@@ -933,10 +917,14 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         interface=IWaveformGenerator)
             options.frequency = frequency
             self.control_board.measure_impedance_non_blocking(
-                app_values['sampling_time_ms'],
+                app_values['sampling_window_ms'],
                 int(math.ceil(options.duration /
-                              app_values['sampling_time_ms'])),
-                app_values['delay_between_samples_ms'], state)
+                              (app_values['sampling_window_ms'] + \
+                               app_values['delay_between_windows_ms']))),
+                app_values['delay_between_windows_ms'],
+                app_values['interleave_feedback_samples'],
+                app_values['use_rms'],
+                state)
             logger.debug('[DMFControlBoardPlugin] _callback_sweep_frequency: '
                          'timeout_add(%d, _callback_sweep_frequency)' %
                          options.duration)
@@ -946,6 +934,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                                   options, results, state,
                                                   frequencies)
         else:
+            app.experiment_log.add_data({"FeedbackResultsSeries": results},
+                                        self.name)
             self.step_complete()
         return False  # Stop the timeout from refiring
 
@@ -958,16 +948,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
         # if this isn't the first call, we need to retrieve the data from the
         # previous call
-        if first_call:
+        if not first_call:
             voltage = voltages.pop(0)
-            (V_hv, hv_resistor, V_fb, fb_resistor) = (
-                self.get_impedance_data(options))
-            results.add_voltage_step(voltage, V_hv, hv_resistor, V_fb,
-                                     fb_resistor)
-            app.experiment_log.add_data({"SweepVoltageResults": results},
-                                        self.name)
-            logger.debug("V_actuation=%s" % results.V_actuation())
-            logger.debug("Z_device=%s" % results.Z_device())
+            data = self.get_impedance_data()
+            results.add_data(voltage, data)
+            logger.debug("V_actuation=%s" % data.V_actuation())
+            logger.debug("Z_device=%s" % data.Z_device())
 
         # if there are voltages left to sweep
         if len(voltages):
@@ -976,10 +962,14 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         interface=IWaveformGenerator)
             options.voltage = voltage
             self.control_board.measure_impedance_non_blocking(
-                app_values['sampling_time_ms'],
+                app_values['sampling_window_ms'],
                 int(math.ceil(options.duration /
-                              app_values['sampling_time_ms'])),
-                app_values['delay_between_samples_ms'], state)
+                              (app_values['sampling_window_ms'] + \
+                               app_values['delay_between_windows_ms']))),
+                app_values['delay_between_windows_ms'],
+                app_values['interleave_feedback_samples'],
+                app_values['use_rms'],
+                state)
             logger.debug('[DMFControlBoardPlugin] _callback_sweep_voltage: '
                          'timeout_add(%d, _callback_sweep_voltage)' %
                          options.duration)
@@ -988,6 +978,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                     self._callback_sweep_voltage,
                                     options, results, state, voltages)
         else:
+            app.experiment_log.add_data({"FeedbackResultsSeries": results},
+                                        self.name)
             self.step_complete()
         return False  # Stop the timeout from refiring
 
@@ -1000,7 +992,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Handler called when a protocol starts running.
         """
         app = get_app()
-        if self.control_board.connected():
+        if not self.control_board.connected():
             logger.warning("Warning: no control board connected.")
         elif (self.control_board.number_of_channels() <=
               app.dmf_device.max_channel()):
@@ -1062,21 +1054,21 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app_values = self.get_app_values()
         test_options = deepcopy(options)
         # take 5 samples to allow signal/gain to stabilize
-        test_options.duration = app_values['sampling_time_ms'] * 5
+        test_options.duration = app_values['sampling_window_ms'] * 5
         test_options.feedback_options = FeedbackOptions(
             feedback_enabled=True, action=RetryAction())
         state = np.zeros(self.control_board.number_of_channels())
-        (V_hv, hv_resistor, V_fb, fb_resistor) = \
+        delay_between_windows_ms = 0
+        results = \
             self.control_board.measure_impedance(
-                app_values['sampling_time_ms'],
+                app_values['sampling_window_ms'],
                 int(math.ceil(test_options.duration /
-                              app_values['sampling_time_ms'])),
-                app_values['delay_between_samples_ms'], state)
-        results = FeedbackResults(test_options, app_values['sampling_time_ms'],
-                                  app_values['delay_between_samples_ms'], V_hv,
-                                  hv_resistor, V_fb, fb_resistor,
-                                  self.get_actuated_area(),
-                                  self.control_board.calibration, 0)
+                              (app_values['sampling_window_ms'] + \
+                               delay_between_windows_ms))),
+                delay_between_windows_ms,
+                app_values['interleave_feedback_samples'],
+                app_values['use_rms'],
+                state)
         emit_signal("on_device_impedance_update", results)
         return results
 

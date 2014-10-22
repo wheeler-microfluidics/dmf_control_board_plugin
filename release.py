@@ -1,7 +1,5 @@
 import tarfile
 import yaml
-import subprocess
-import re
 
 from microdrop_utility import Version
 
@@ -12,12 +10,13 @@ plugin_name = 'wheelerlab.dmf_control_board_plugin'
 version = str(Version.from_git_repository())
 
 # write the 'properties.yml' file
-properties = {'plugin_name': 'wheelerlab.dmf_control_board_plugin',
-              'package_name': package_name, 'version': version}
+properties = {'plugin_name': plugin_name, 'package_name': package_name,
+              'version': version}
 with open('properties.yml', 'w') as f:
-  f.write(yaml.dump(properties))
+    f.write(yaml.dump(properties))
 
 # create the tar.gz plugin archive
 with tarfile.open("%s-%s.tar.gz" % (package_name, version), "w:gz") as tar:
-    for name in ['__init__.py', 'feedback.py', 'glade', 'properties.yml']:
+    for name in ['__init__.py', 'feedback.py', 'glade', 'properties.yml',
+                 'hooks', 'on_plugin_install.py', 'requirements.txt']:
         tar.add(name)
