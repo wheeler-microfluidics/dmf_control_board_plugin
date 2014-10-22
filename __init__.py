@@ -487,6 +487,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 default=settings['voltage_tolerance'], optional=True,
                 validators=[ValueAtLeast(minimum=0), ]),
         )
+        settings['use_antialiasing_filter'] = \
+            self.control_board.use_antialiasing_filter
+        schema_entries.append(
+            Boolean.named('use_antialiasing_filter').using(
+                default=settings['use_antialiasing_filter'], optional=True, )
+        )
 
         if hardware_version.major == 1:
             settings['WAVEOUT_GAIN_1'] = self.control_board.waveout_gain_1
@@ -567,6 +573,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             .signal_generator_board_i2c_address = v
                     elif k == 'voltage_tolerance':
                         self.control_board.voltage_tolerance = v
+                    elif k == 'use_antialiasing_filter':
+                        self.control_board.use_antialiasing_filter = v
                     elif m:
                         series_resistor = int(m.group(3))
                         if m.group(2) == 'hv':
@@ -839,7 +847,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         """
         app_values = self.get_app_values()
         results = self.control_board.get_impedance_data()
-        emit_signal("on_device_impedance_update", results)
         return results
 
     def _kill_running_step(self):
@@ -883,6 +890,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         (app.protocol.current_step_number,
                          app.protocol.current_step_attempt,
                          np.max(normalized_capacitance)))
+            emit_signal("on_device_impedance_update", results)
         self.step_complete(return_value)
         return False  # Stop the timeout from refiring
 
