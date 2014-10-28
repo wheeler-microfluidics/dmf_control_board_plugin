@@ -642,9 +642,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                          "amplifier is on.")
         else:
             voltage = results.voltage
-            if feedback_options.action.__class__ == RetryAction:
-                attempt = app.protocol.current_step_attempt
-                voltage += (feedback_options.action.increase_voltage * attempt)
             logger.info('[DMFControlBoardPlugin]'
                         '.on_device_impedance_update():')
             logger.info('\tset_voltage=%.1f, measured_voltage=%.1f, '
