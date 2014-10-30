@@ -314,7 +314,7 @@ class FeedbackOptionsController():
         test_options.feedback_options = FeedbackOptions(
             feedback_enabled=True, action=RetryAction())
         self.plugin.check_impedance(test_options)
-        results = self.plugin.control_board.measure_impedance(
+        results = self.plugin.measure_impedance(
                 app_values['sampling_window_ms'],
                 int(math.ceil(test_options.duration /
                 app_values['sampling_window_ms'])), 0,
@@ -1610,7 +1610,7 @@ bration#high-voltage-attenuation-calibration'''.strip(),
                     emit_signal("set_voltage", options.voltage,
                                 interface=IWaveformGenerator)
                     (v_hv, hv_resistor, v_fb, fb_resistor) = (
-                        self.plugin.control_board.measure_impedance(
+                        self.plugin.measure_impedance(
                             sampling_window_ms,
                             int(math.ceil(options.duration /
                                           sampling_window_ms)),

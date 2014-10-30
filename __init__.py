@@ -738,7 +738,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                 emit_signal("set_frequency", frequency,
                                             interface=IWaveformGenerator)
                                 self.check_impedance(options)
-                            self.control_board.measure_impedance_non_blocking(
+                            self.measure_impedance_non_blocking(
                                 app_values['sampling_window_ms'],
                                 int(math.ceil(options.duration / (
                                               app_values['sampling_window_ms'] + 
@@ -913,7 +913,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             emit_signal("set_frequency", frequency,
                         interface=IWaveformGenerator)
             options.frequency = frequency
-            self.control_board.measure_impedance_non_blocking(
+            self.measure_impedance_non_blocking(
                 app_values['sampling_window_ms'],
                 int(math.ceil(options.duration /
                               (app_values['sampling_window_ms'] + \
@@ -958,7 +958,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             emit_signal("set_voltage", voltage,
                         interface=IWaveformGenerator)
             options.voltage = voltage
-            self.control_board.measure_impedance_non_blocking(
+            self.measure_impedance_non_blocking(
                 app_values['sampling_window_ms'],
                 int(math.ceil(options.duration /
                               (app_values['sampling_window_ms'] + \
@@ -1057,7 +1057,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         state = np.zeros(self.control_board.number_of_channels())
         delay_between_windows_ms = 0
         results = \
-            self.control_board.measure_impedance(
+            self.measure_impedance(
                 app_values['sampling_window_ms'],
                 int(math.ceil(test_options.duration /
                               (app_values['sampling_window_ms'] + \
@@ -1069,6 +1069,77 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         emit_signal("on_device_impedance_update", results)
         return results
 
+    def _check_n_sampling_windows(self,
+                                  sampling_window_ms,
+                                  n_sampling_windows,
+                                  delay_between_windows_ms):
+        # figure out the maximum number of sampling windows we can collect
+        # before filling the serial buffer
+        n_sampling_windows_max = \
+            (self.control_board.MAX_PAYLOAD_LENGTH - 4) / 6
+
+        # if we're going to exceed this number, adjust the delay between
+        # samples
+        if n_sampling_windows > n_sampling_windows_max:
+
+            duration = (sampling_window_ms + delay_between_windows_ms) * \
+                n_sampling_windows
+            delay_between_windows_ms = duration / \
+                n_sampling_windows_max - sampling_window_ms
+            logger.info('[DMFControlBoardPlugin] _check_n_sampling_windows():'
+                        ' n_sampling_windows=%d > %d' % (n_sampling_windows,
+                                                         n_sampling_windows_max))
+            logger.info('[DMFControlBoardPlugin] _check_n_sampling_windows():'
+                        ' delay_between_windows_ms=%d' % delay_between_windows_ms)
+            return n_sampling_windows_max, delay_between_windows_ms
+        return n_sampling_windows, delay_between_windows_ms
+
+    def measure_impedance_non_blocking(self,
+                                       sampling_window_ms,
+                                       n_sampling_windows,
+                                       delay_between_windows_ms,
+                                       interleave_samples,
+                                       rms,
+                                       state):
+        # wrapper function to adjust the delay between sampling windows if
+        # necessary to avoid exceeding the maximum serial buffer length
+
+        n_sampling_windows, delay_between_windows_ms = \
+            self._check_n_sampling_windows(sampling_window_ms,
+                                           n_sampling_windows,
+                                           delay_between_windows_ms)
+
+        self.control_board.measure_impedance_non_blocking(
+                                             sampling_window_ms,
+                                             n_sampling_windows,
+                                             delay_between_windows_ms,
+                                             interleave_samples,
+                                             rms,
+                                             state)
+        
+    def measure_impedance(self,
+                          sampling_window_ms,
+                          n_sampling_windows,
+                          delay_between_windows_ms,
+                          interleave_samples,
+                          rms,
+                          state):
+        # wrapper function to adjust the delay between sampling windows if
+        # necessary to avoid exceeding the maximum serial buffer length
+
+        n_sampling_windows, delay_between_windows_ms = \
+            self._check_n_sampling_windows(sampling_window_ms,
+                                           n_sampling_windows,
+                                           delay_between_windows_ms)
+
+        return self.control_board.measure_impedance(
+                                             sampling_window_ms,
+                                             n_sampling_windows,
+                                             delay_between_windows_ms,
+                                             interleave_samples,
+                                             rms,
+                                             state)
+        
     def get_default_step_options(self):
         return DMFControlBoardOptions()
 
