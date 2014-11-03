@@ -29,7 +29,7 @@ import gobject
 import numpy as np
 from path_helpers import path
 from flatland import Integer, Boolean, Float, Form, Enum
-from flatland.validation import ValueAtLeast, ValueAtMost
+from flatland.validation import ValueAtLeast, ValueAtMost, Validator
 import microdrop_utility as utility
 from microdrop_utility.user_paths import home_dir
 from microdrop_utility.gui import yesno, FormViewDialog
@@ -79,6 +79,37 @@ def format_func(value):
         return False
 
 
+def max_voltage(element, state):
+    """Verify that the voltage is below a set maximum"""
+    service = get_service_instance_by_name(
+        get_plugin_info(path(__file__).parent).plugin_name)
+
+    if service.control_board.connected() and \
+        element.value > service.control_board.max_waveform_voltage:
+        return element.errors.append('Voltage exceeds the maximum value '
+                                     '(%d V).' % 
+                                     service.control_board.max_waveform_voltage)
+    else:
+        return True
+
+
+def check_frequency(element, state):
+    """Verify that the frequency is within the valid range"""
+    service = get_service_instance_by_name(
+        get_plugin_info(path(__file__).parent).plugin_name)
+
+    if service.control_board.connected() and \
+        (element.value < service.control_board.min_waveform_frequency or \
+        element.value > service.control_board.max_waveform_frequency):
+        return element.errors.append('Frequency is outside of the valid range ' 
+            '(%.1f - %.1f Hz).' % 
+            (service.control_board.min_waveform_frequency, 
+             service.control_board.max_waveform_frequency)
+        )
+    else:
+        return True
+
+
 class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     """
     This class is automatically registered with the PluginManager.
@@ -115,9 +146,11 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                         validators=
                                         [ValueAtLeast(minimum=0), ]),
         Float.named('voltage').using(default=100, optional=True,
-                                     validators=[ValueAtLeast(minimum=0), ]),
+                                     validators=[ValueAtLeast(minimum=0), 
+                                                 max_voltage]),
         Float.named('frequency').using(default=1e3, optional=True,
-                                       validators=[ValueAtLeast(minimum=0), ]),
+                                       validators=[ValueAtLeast(minimum=0), 
+                                                   check_frequency]),
         Boolean.named('feedback_enabled').using(default=True, optional=True),
     )
     _feedback_fields = set(['feedback_enabled'])
@@ -493,7 +526,27 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             Boolean.named('use_antialiasing_filter').using(
                 default=settings['use_antialiasing_filter'], optional=True, )
         )
-
+        settings['max_waveform_voltage'] = \
+            self.control_board.max_waveform_voltage
+        schema_entries.append(
+            Float.named('max_waveform_voltage').using(
+                default=settings['max_waveform_voltage'], optional=True,
+                validators=[ValueAtLeast(minimum=0), ]),
+        )
+        settings['min_waveform_frequency'] = \
+            self.control_board.min_waveform_frequency
+        schema_entries.append(
+            Float.named('min_waveform_frequency').using(
+                default=settings['min_waveform_frequency'], optional=True,
+                validators=[ValueAtLeast(minimum=0), ]),
+        )
+        settings['max_waveform_frequency'] = \
+            self.control_board.max_waveform_frequency
+        schema_entries.append(
+            Float.named('max_waveform_frequency').using(
+                default=settings['max_waveform_frequency'], optional=True,
+                validators=[ValueAtLeast(minimum=0), ]),
+        )
         if hardware_version.major == 1:
             settings['WAVEOUT_GAIN_1'] = self.control_board.waveout_gain_1
             schema_entries.append(
@@ -575,6 +628,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         self.control_board.voltage_tolerance = v
                     elif k == 'use_antialiasing_filter':
                         self.control_board.use_antialiasing_filter = v
+                    elif k == 'max_waveform_voltage':
+                        self.control_board.min_waveform_voltage = v
+                    elif k == 'min_waveform_frequency':
+                        self.control_board.min_waveform_frequency = v
+                    elif k == 'max_waveform_frequency':
+                        self.control_board.max_waveform_frequency = v
                     elif m:
                         series_resistor = int(m.group(3))
                         if m.group(2) == 'hv':
@@ -1147,12 +1206,16 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         step_number = self.get_step_number(step_number)
         logger.debug('[DMFControlBoardPlugin] set_step[%d]_values(): '
                      'values_dict=%s' % (step_number, values_dict,))
-        el = self.StepFields(value=values_dict)
+        form = self.StepFields(value=values_dict)
         try:
-            if not el.validate():
-                raise ValueError()
+            if not form.validate():
+                errors = ""
+                for name, field in form.iteritems():
+                    for msg in field.errors:
+                        errors += " " + msg
+                raise ValueError(errors)
             options = self.get_step_options(step_number=step_number)
-            for name, field in el.iteritems():
+            for name, field in form.iteritems():
                 if field.value is None:
                     continue
                 if name in self._feedback_fields:
