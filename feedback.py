@@ -321,7 +321,7 @@ class FeedbackOptionsController():
                 app_values['interleave_feedback_samples'],
                 app_values['use_rms'],
                 state)
-        
+        results.area = area
         normalized_capacitance = np.mean(np.max(np.ma.masked_invalid(
             results.capacitance() / area)))
         logging.info('mean(results.capacitance())/area=%s' %
@@ -857,6 +857,8 @@ class FeedbackResultsController():
         self.combobox_y_axis = self.builder.get_object("combobox_y_axis")
         self.checkbutton_normalize_by_area = self.builder.get_object(
             "checkbutton_normalize_by_area")
+        self.checkbutton_filter = self.builder.get_object(
+            "checkbutton_filter")
         self.window.set_title("Feedback Results")
         self.builder.connect_signals(self)
         self.data = []
@@ -916,9 +918,16 @@ class FeedbackResultsController():
         self.checkbutton_normalize_by_area.set_sensitive(y_axis == "Impedance"
                                                          or y_axis ==
                                                          "Capacitance")
+        self.checkbutton_filter.set_sensitive(y_axis == "Impedance" or \
+                                              y_axis == "Capacitance" or \
+                                              y_axis == "Velocity" or \
+                                              y_axis == "x-position")
         self.update_plot()
 
     def on_checkbutton_normalize_by_area_toggled(self, widget, data=None):
+        self.update_plot()
+
+    def on_checkbutton_filter_toggled(self, widget, data=None):
         self.update_plot()
 
     def on_export_data_clicked(self, widget, data=None):
@@ -996,17 +1005,18 @@ class FeedbackResultsController():
             self.axis.set_title("x-position")
             self.axis.set_ylabel("x-position (mm)")
 
+        handles = []
         if x_axis == "Time":
             self.axis.set_xlabel("Time (ms)")
             for row in self.data:
                 if (self.plugin.name in row.keys() and "FeedbackResults" in
                         row[self.plugin.name].keys()):
                     results = row[self.plugin.name]["FeedbackResults"]
-
                     state_of_channels = protocol[row['core']["step"]]. \
                         get_data('microdrop.gui.dmf_device_controller'). \
                         state_of_channels
                     area = dmf_device.actuated_area(state_of_channels)
+                    results.area = area 
                     
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
@@ -1030,33 +1040,57 @@ class FeedbackResultsController():
                             == 0)))
 
                     if y_axis == "Impedance":
-                        self.axis.plot(results.time[ind],
-                                       results.Z_device()[ind] / normalization)
+                        Z = results.Z_device()
+                        if self.checkbutton_filter.get_active():
+                            lines = self.axis.plot(results.time,
+                                results.Z_device(filter_order=3) / \
+                                normalization)
+                            c = matplotlib.colors.colorConverter.to_rgba(
+                                lines[0].get_c(), alpha=.2)
+                            handles.append(lines[0])
+                            self.axis.plot(results.time, Z / normalization,
+                                           color=c)
+                        else:
+                            self.axis.plot(results.time, Z / normalization)
                         self.export_data.append('time (ms):, ' +
                                                 ", ".join([str(x) for x in
-                                                           results.time[ind]]))
+                                                           results.time]))
                         self.export_data.append('impedance (Ohms%s):, ' %
                                                 (normalization_string) +
                                                 ", ".join([str(x) for x in
-                                                           results.Z_device()
-                                                           [ind] /
-                                                           normalization]))
+                                                           Z / normalization]))
                     elif y_axis == "Capacitance":
-                        self.axis.plot(results.time[ind],
-                                       results.capacitance()[ind] /
-                                       normalization)
+                        C = results.capacitance()
+                        if self.checkbutton_filter.get_active():
+                            C_filtered = results.capacitance(filter_order=2)
+                            lines = self.axis.plot(results.time,
+                                C_filtered / normalization)
+                            handles.append(lines[0])
+                            c = matplotlib.colors.colorConverter.to_rgba(
+                                lines[0].get_c(), alpha=.2)
+                            self.axis.plot(results.time, C / normalization,
+                                           color=c)
+                        else:
+                            self.axis.plot(results.time, C / normalization)
                         self.export_data.append('time (ms):, ' +
                                                 ", ".join([str(x) for x in
-                                                           results.time[ind]]))
+                                                           results.time]))
                         self.export_data.append('capacitance (F%s):,' %
                                                 normalization_string +
                                                 ", ".join([str(x) for x in
-                                                           results
-                                                           .capacitance()[ind]
-                                                           / normalization]))
+                                                           C / normalization]))
                     elif y_axis == "Velocity":
-                        t, dxdt = results.dxdt(area, ind)
-                        self.axis.plot(t, dxdt * 1000)
+                        if self.checkbutton_filter.get_active():
+                            t, dxdt = results.dxdt(filter_order=3)
+                            lines = self.axis.plot(t, dxdt * 1000)
+                            handles.append(lines[0])
+                            c = matplotlib.colors.colorConverter.to_rgba(
+                                lines[0].get_c(), alpha=.2)
+                            t, dxdt = results.dxdt()
+                            self.axis.plot(t, dxdt * 1000, color=c)
+                        else:
+                            t, dxdt = results.dxdt()
+                            self.axis.plot(t, dxdt * 1000)
                         self.export_data.append('time (ms):, ' +
                                                 ", ".join([str(x) for x in t]))
                         self.export_data.append('velocity (mm/s):,' +
@@ -1074,11 +1108,19 @@ class FeedbackResultsController():
                                                            .V_actuation()
                                                            [ind]]))
                     elif y_axis == "x-position":
-                        t = results.time[ind]
-                        x_pos = results.x_position(area)[ind]
-                        self.axis.plot(t, x_pos)
+                        x_pos = results.x_position()
+                        if self.checkbutton_filter.get_active():
+                            lines = self.axis.plot(results.time,
+                                results.x_position(filter_order=3))
+                            handles.append(lines[0])
+                            c = matplotlib.colors.colorConverter.to_rgba(
+                                lines[0].get_c(), alpha=.2)
+                            self.axis.plot(results.time, x_pos, color=c)
+                        else:
+                            self.axis.plot(results.time, x_pos)
                         self.export_data.append('time (ms):, ' +
-                                                ", ".join([str(x) for x in t]))
+                                                ", ".join([str(x) for x in
+                                                           results.time]))
                         self.export_data.append('velocity (mm/s):,' +
                                                 ", ".join([str(x) for x in
                                                            x_pos]))
@@ -1242,7 +1284,11 @@ class FeedbackResultsController():
                                                         1,
                                                         row['core']["time"]))
         if len(legend):
-            self.axis.legend(legend, loc=legend_loc)
+            if len(handles):
+                self.axis.legend(handles, legend, loc=legend_loc)
+            else:
+                self.axis.legend(legend, loc=legend_loc)
+            
         self.figure.subplots_adjust(left=0.17, bottom=0.15)
         self.canvas.draw()
 

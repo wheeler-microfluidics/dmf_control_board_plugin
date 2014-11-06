@@ -903,6 +903,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         """
         app_values = self.get_app_values()
         results = self.control_board.get_impedance_data()
+        results.area = self.get_actuated_area()
         return results
 
     def _kill_running_step(self):
