@@ -629,7 +629,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     elif k == 'use_antialiasing_filter':
                         self.control_board.use_antialiasing_filter = v
                     elif k == 'max_waveform_voltage':
-                        self.control_board.min_waveform_voltage = v
+                        self.control_board.max_waveform_voltage = v
                     elif k == 'min_waveform_frequency':
                         self.control_board.min_waveform_frequency = v
                     elif k == 'max_waveform_frequency':
@@ -932,10 +932,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         normalized_capacitance = np.ma.masked_invalid(results.capacitance() / 
             area)
         
-        if (self.control_board.calibration.C_drop and
+        if (self.control_board.calibration._C_drop and
                 np.max(normalized_capacitance) < 
                 options.feedback_options.action.percent_threshold / 100.0 *
-                self.control_board.calibration.C_drop):
+                self.control_board.calibration.C_drop(options.frequency)):
             logger.info('step=%d: attempt=%d, max(C)/A=%.1e F/mm^2. Repeat' %
                         (app.protocol.current_step_number,
                          app.protocol.current_step_attempt,

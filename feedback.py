@@ -36,7 +36,6 @@ if os.name == 'nt':
 from matplotlib.figure import Figure
 from path_helpers import path
 import scipy.optimize as optimize
-
 from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
                                                 FigureCanvasGTK)
 from matplotlib.backends.backend_gtkagg import (NavigationToolbar2GTKAgg as
@@ -51,9 +50,9 @@ from flatland.validation import ValueAtLeast
 from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
-
 from dmf_control_board import FeedbackCalibration, FeedbackResults, \
     FeedbackResultsSeries
+from microdrop.plugin_helpers import get_plugin_info
 
 
 class AmplifierGainNotCalibrated(Exception):
@@ -120,18 +119,30 @@ class SweepFrequencyAction():
                  start_frequency=None,
                  end_frequency=None,
                  n_frequency_steps=None):
+        
+        service = get_service_instance_by_name(
+            get_plugin_info(path(__file__).parent).plugin_name)
+
         if start_frequency:
             self.start_frequency = start_frequency
         else:
-            self.start_frequency = 1e2
+            if service.control_board.connected():
+                self.start_frequency = \
+                    service.control_board.min_waveform_frequency
+            else:
+                self.start_frequency = 100
         if end_frequency:
             self.end_frequency = end_frequency
         else:
-            self.end_frequency = 30e3
+            if service.control_board.connected():
+                self.end_frequency = \
+                    service.control_board.max_waveform_frequency
+            else:
+                self.end_frequency = 20e3
         if n_frequency_steps:
             self.n_frequency_steps = n_frequency_steps
         else:
-            self.n_frequency_steps = 30
+            self.n_frequency_steps = 10
 
 
 class SweepVoltageAction():
@@ -278,11 +289,11 @@ class FeedbackOptionsController():
         return True
 
     def on_measure_cap_filler(self, widget, data=None):
-        self.plugin.control_board.calibration.C_filler = \
+        self.plugin.control_board.calibration._C_filler = \
             self.measure_device_capacitance()
 
     def on_measure_cap_liquid(self, widget, data=None):
-        self.plugin.control_board.calibration.C_drop = \
+        self.plugin.control_board.calibration._C_drop = \
             self.measure_device_capacitance()
 
     def measure_device_capacitance(self):
@@ -304,30 +315,49 @@ class FeedbackOptionsController():
         step = app.protocol.current_step()
         dmf_options = step.get_data(self.plugin.name)
         voltage = dmf_options.voltage
-        frequency = dmf_options.frequency
-        emit_signal("set_frequency", frequency,
-                    interface=IWaveformGenerator)
         emit_signal("set_voltage", voltage, interface=IWaveformGenerator)
         app_values = self.plugin.get_app_values()
         test_options = deepcopy(dmf_options)
         test_options.duration = 5 * app_values['sampling_window_ms']
         test_options.feedback_options = FeedbackOptions(
-            feedback_enabled=True, action=RetryAction())
-        self.plugin.check_impedance(test_options)
-        results = self.plugin.measure_impedance(
+            feedback_enabled=True, action=SweepFrequencyAction()
+        )
+
+        results = FeedbackResultsSeries('Frequency')
+        for frequency in np.logspace(
+            np.log10(test_options.feedback_options.action.start_frequency),
+            np.log10(test_options.feedback_options.action.end_frequency),
+            int(test_options.feedback_options.action.n_frequency_steps)
+        ):
+            emit_signal("set_frequency", frequency,
+                        interface=IWaveformGenerator)
+            data = self.plugin.measure_impedance(
                 app_values['sampling_window_ms'],
                 int(math.ceil(test_options.duration /
-                app_values['sampling_window_ms'])), 0,
+                              (app_values['sampling_window_ms'] + \
+                               app_values['delay_between_windows_ms']))),
+                app_values['delay_between_windows_ms'],
                 app_values['interleave_feedback_samples'],
                 app_values['use_rms'],
                 state)
-        results.area = area
-        normalized_capacitance = np.mean(np.max(np.ma.masked_invalid(
-            results.capacitance() / area)))
-        logging.info('mean(results.capacitance())/area=%s' %
-                     normalized_capacitance)
+            results.add_data(frequency, data)
+            results.area = area
+            capacitance = np.mean(results.capacitance())
+            logging.info('\tcapacitance = %e F (%e F/mm^2)' % \
+                     (capacitance, capacitance / area))
+
+        capacitance = np.mean(results.capacitance())
+        logging.info('mean(capacitance) = %e F (%e F/mm^2)' % \
+                     (capacitance, capacitance / area))
+        
+        # set the channels and frequency back to their original state
         self.plugin.control_board.state_of_all_channels = current_state
-        return normalized_capacitance
+        emit_signal("set_frequency",
+                    dmf_options.frequency,
+                    interface=IWaveformGenerator)
+        return dict(frequency=results.frequency.tolist(),
+                    capacitance=(np.mean(results.capacitance(), 1) / area). \
+                        tolist())
 
     def on_button_feedback_enabled_toggled(self, widget, data=None):
         """
@@ -1397,18 +1427,21 @@ class FeedbackCalibrationController():
         #    * `FeedbackResults`
         #    * `FeedbackResultsSeries`
         for row in selected_data:
-            try:
-                if 'FeedbackResults' in row[self.plugin.name]:
-                    calibration_list.append(row[self.plugin.name]
-                                            ['FeedbackResults'].calibration)
-                elif 'FeedbackResultsSeries' in row[self.plugin.name]:
-                    calibration_list.append(row[self.plugin.name]
-                                            ['FeedbackResultsSeries']
-                                            .calibration)
-            except:
+            data = None
+            if self.plugin.name not in row.keys():
+                continue
+            
+            if 'FeedbackResults' in row[self.plugin.name]:
+                data = row[self.plugin.name]['FeedbackResults']
+            elif 'FeedbackResultsSeries' in row[self.plugin.name]:
+                data = row[self.plugin.name]['FeedbackResultsSeries']
+            else:
                 # The current row does not contain any results.
                 continue
 
+            calibration_list.append(data.calibration)
+            frequency = data.frequency
+            
             # There is a calibration result entry in this row, and it has been
             # added to the end of `calibration_list`.  Therefore, to retrieve
             # it, we retrieve the last item in `calibration_list`.
@@ -1419,8 +1452,8 @@ class FeedbackCalibrationController():
             if len(calibration_list) == 1:
                 # If we only have one calibration result entry, set the default
                 # value for the edit dialog to the value from the result entry.
-                settings["C_drop"] = calibration.C_drop
-                settings["C_filler"] = calibration.C_filler
+                settings["C_drop"] = calibration.C_drop(frequency)
+                settings["C_filler"] = calibration.C_filler(frequency)
                 for i in range(len(calibration.R_hv)):
                     settings['R_hv_%d' % i] = calibration.R_hv[i]
                     settings['C_hv_%d' % i] = calibration.C_hv[i]
@@ -1435,8 +1468,8 @@ class FeedbackCalibrationController():
                 def check_group_value(name, new):
                     if settings[name] and settings[name] != new:
                         settings[name] = None
-                check_group_value("C_drop", calibration.C_drop)
-                check_group_value("C_filler", calibration.C_filler)
+                check_group_value("C_drop", calibration.C_drop(frequency))
+                check_group_value("C_filler", calibration.C_filler(frequency))
                 for i in range(len(calibration.R_hv)):
                     check_group_value('R_hv_%d' % i, calibration.R_hv[i])
                     check_group_value('C_hv_%d' % i, calibration.C_hv[i])
@@ -1444,9 +1477,13 @@ class FeedbackCalibrationController():
                     check_group_value('R_fb_%d' % i, calibration.R_fb[i])
                     check_group_value('C_fb_%d' % i, calibration.C_fb[i])
 
+        # no calibration objects?
+        if not calibration_list:
+            return
+
         def set_field_value(name, multiplier=1):
             string_value = ""
-            if settings[name]:
+            if name in settings.keys() and settings[name]:
                 string_value = str(settings[name] * multiplier)
             schema_entries.append(String.named(name).using(
                 default=string_value, optional=True))
@@ -1480,18 +1517,18 @@ class FeedbackCalibrationController():
                                         > .0001)):
                     return float(response[name]) / multiplier
             except ValueError:
-                logging.error('C_drop value (%s) is invalid.' %
-                              response['C_drop'])
+                logging.error('%s value (%s) is invalid.' %
+                              (name, response[name]))
             return None
 
         value = get_field_value('C_drop', 1e12)
         if value:
             for calibration in calibration_list:
-                calibration.C_drop = value
+                calibration._C_drop = value
         value = get_field_value('C_filler', 1e12)
         if value:
             for calibration in calibration_list:
-                calibration.C_filler = value
+                calibration._C_filler = value
         for i in range(len(calibration.R_hv)):
             value = get_field_value('R_hv_%d' % i)
             if value:
