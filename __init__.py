@@ -87,7 +87,7 @@ def max_voltage(element, state):
     if service.control_board.connected() and \
         element.value > service.control_board.max_waveform_voltage:
         return element.errors.append('Voltage exceeds the maximum value '
-                                     '(%d V).' % 
+                                     '(%d V).' %
                                      service.control_board.max_waveform_voltage)
     else:
         return True
@@ -101,9 +101,9 @@ def check_frequency(element, state):
     if service.control_board.connected() and \
         (element.value < service.control_board.min_waveform_frequency or \
         element.value > service.control_board.max_waveform_frequency):
-        return element.errors.append('Frequency is outside of the valid range ' 
-            '(%.1f - %.1f Hz).' % 
-            (service.control_board.min_waveform_frequency, 
+        return element.errors.append('Frequency is outside of the valid range '
+            '(%.1f - %.1f Hz).' %
+            (service.control_board.min_waveform_frequency,
              service.control_board.max_waveform_frequency)
         )
     else:
@@ -146,10 +146,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                         validators=
                                         [ValueAtLeast(minimum=0), ]),
         Float.named('voltage').using(default=100, optional=True,
-                                     validators=[ValueAtLeast(minimum=0), 
+                                     validators=[ValueAtLeast(minimum=0),
                                                  max_voltage]),
         Float.named('frequency').using(default=1e3, optional=True,
-                                       validators=[ValueAtLeast(minimum=0), 
+                                       validators=[ValueAtLeast(minimum=0),
                                                    check_frequency]),
         Boolean.named('feedback_enabled').using(default=True, optional=True),
     )
@@ -464,14 +464,23 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         dialog.destroy()
 
         if response == gtk.RESPONSE_OK:
-            response = yesno('File exists. Would you like to overwrite it?')
-            if response == gtk.RESPONSE_YES:
-                config = self.control_board.read_config()
-                config_str = yaml.dump(dict([(k, v) for k, v in
-                                             config.iteritems() if v is not
-                                             None]))
-                with filename.open('wb') as output:
-                    print >> output, '''
+            if filename.isfile():
+                response = yesno('File exists. Would you like to overwrite it?')
+                if response != gtk.RESPONSE_YES:
+                    return
+            config = self.control_board.read_config()
+            config = dict([(k, v) for k, v in config.iteritems()
+                           if v is not None])
+            for k in config.keys():
+                # Yaml doesn't support serializing numpy scalar types, but the
+                # configuration returned by `read_config` may contain numpy
+                # floating point values.  Therefore, we check and cast each
+                # numpy float as a native Python float.
+                if isinstance(config[k], np.float32):
+                    config[k] = float(config[k])
+            config_str = yaml.dump(config)
+            with filename.open('wb') as output:
+                print >> output, '''
 # DropBot DMF control-board configuration
 # =======================================
 #'
@@ -481,8 +490,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 # [1]: http://microfluidics.utoronto.ca/trac/dropbot/ticket/41#ticket
 # [2]: http://microfluidics.utoronto.ca/trac/dropbot
 # [3]: http://microfluidics.utoronto.ca'''.strip()
-
-                    print >> output, config_str
+                print >> output, config_str
 
     def on_edit_configuration(self, widget=None, data=None):
         '''
@@ -800,7 +808,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             self.measure_impedance_non_blocking(
                                 app_values['sampling_window_ms'],
                                 int(math.ceil(options.duration / (
-                                              app_values['sampling_window_ms'] + 
+                                              app_values['sampling_window_ms'] +
                                               app_values['delay_between_windows_ms']))),
                                 app_values['delay_between_windows_ms'],
                                 app_values['interleave_feedback_samples'],
@@ -928,12 +936,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         logger.debug("V_actuation=%s" % results.V_actuation())
         logger.debug("Z_device=%s" % results.Z_device())
         app.experiment_log.add_data({"FeedbackResults": results}, self.name)
-        
-        normalized_capacitance = np.ma.masked_invalid(results.capacitance() / 
+
+        normalized_capacitance = np.ma.masked_invalid(results.capacitance() /
             area)
-        
+
         if (self.control_board.calibration._C_drop and
-                np.max(normalized_capacitance) < 
+                np.max(normalized_capacitance) <
                 options.feedback_options.action.percent_threshold / 100.0 *
                 self.control_board.calibration.C_drop(options.frequency)):
             logger.info('step=%d: attempt=%d, max(C)/A=%.1e F/mm^2. Repeat' %
@@ -1176,7 +1184,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                              interleave_samples,
                                              rms,
                                              state)
-        
+
     def measure_impedance(self,
                           sampling_window_ms,
                           n_sampling_windows,
@@ -1199,7 +1207,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                              interleave_samples,
                                              rms,
                                              state)
-        
+
     def get_default_step_options(self):
         return DMFControlBoardOptions()
 
