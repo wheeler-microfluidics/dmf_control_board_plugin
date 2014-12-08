@@ -52,15 +52,32 @@ from microdrop.app_context import get_app
 from microdrop.plugin_helpers import get_plugin_info
 from dmf_control_board import (FeedbackCalibration, FeedbackResults,
                                FeedbackResultsSeries)
-from dmf_control_board.gui.assistant import AssistantView
+from dmf_control_board.gui.reference import (AssistantView as
+                                             ReferenceAssistantView)
+from dmf_control_board.gui.impedance import (AssistantView as
+                                             ImpedanceAssistantView)
 from dmf_control_board.calibrate.hv_attenuator import (
     resistor_max_actuation_readings, fit_feedback_params,
     update_control_board_calibration, plot_feedback_params)
 
 
-class MicrodropAssistantView(AssistantView):
+class MicrodropReferenceAssistantView(ReferenceAssistantView):
     def create_ui(self):
-        super(MicrodropAssistantView, self).create_ui()
+        super(MicrodropReferenceAssistantView, self).create_ui()
+        self.widget.set_modal(True)
+
+    def close_button_clicked(self, assistant):
+        self.widget.set_modal(False)
+        assistant.hide()
+
+    def cancel_button_clicked(self, assistant):
+        self.widget.set_modal(False)
+        assistant.hide()
+
+
+class MicrodropImpedanceAssistantView(ImpedanceAssistantView):
+    def create_ui(self):
+        super(MicrodropImpedanceAssistantView, self).create_ui()
         self.widget.set_modal(True)
 
     def close_button_clicked(self, assistant):
@@ -1634,23 +1651,22 @@ class FeedbackCalibrationController():
             logging.info(str(fitted_params))
 
     def calibrate_attenuators(self):
-        view = MicrodropAssistantView(self.plugin.control_board)
+        view = MicrodropReferenceAssistantView(self.plugin.control_board)
 
         def on_calibrated(assistant):
             self.plugin.save_config()
-            response = yesno('''
-# Feedback resistors calibration #
+            self.calibrate_impedance()
 
-Would you like to calibrate the feedback resistors?
+        # Save the persistent configuration settings from the control-board to
+        # a file upon successful calibration.
+        view.widget.connect('close', on_calibrated)
+        view.show()
 
-Please note that you must have an electrode covered by a drop and that
-electrode should be actuated.
+    def calibrate_impedance(self):
+        view = MicrodropImpedanceAssistantView(self.plugin.control_board)
 
-If the device is not ready, press \"No\", setup the drop and relaunch the
-calibration wizard.'''.strip())
-
-            if response == gtk.RESPONSE_YES:
-                self.calibrate_feedback_resistors()
+        def on_calibrated(assistant):
+            self.plugin.save_config()
 
         # Save the persistent configuration settings from the control-board to
         # a file upon successful calibration.

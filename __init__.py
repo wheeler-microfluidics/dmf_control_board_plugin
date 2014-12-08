@@ -21,7 +21,6 @@ import logging
 import math
 import re
 from copy import deepcopy
-from collections import OrderedDict
 
 from pygtkhelpers.ui.dialogs import info as info_dialog
 import yaml
@@ -47,11 +46,11 @@ from microdrop.app_context import get_app
 from microdrop.dmf_device import DeviceScaleNotSet
 
 from dmf_control_board import DMFControlBoard, FeedbackResultsSeries
-from serial_device import SerialDevice, get_serial_ports
 from feedback import (FeedbackOptions, FeedbackOptionsController,
                       FeedbackCalibrationController,
                       FeedbackResultsController, RetryAction,
                       SweepFrequencyAction, SweepVoltageAction)
+from serial_device import SerialDevice, get_serial_ports
 from nested_structures import apply_depth_first, apply_dict_depth_first
 
 
@@ -184,7 +183,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
         self.menu_actions = [('Calibration',
                               ['Load from file',
-                               'Perform calibration',
+                               'Calibrate reference load',
+                               'Calibrate device load',
                                'Fit from file']),
                              ('Configuration',
                               ['Reset to default values',
@@ -273,9 +273,13 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 'activate', self.on_reset_configuration_to_default_values)
 
             menu = self.menu_items['Calibration']
-            menu['Perform calibration'][0].connect(
+            menu['Calibrate reference load'][0].connect(
                 'activate',
                 self.feedback_calibration_controller.on_perform_calibration)
+            menu['Calibrate device load'][0].connect(
+                'activate',
+                lambda *args: self.feedback_calibration_controller
+                .calibrate_impedance())
             menu['Fit from file'][0].connect(
                 'activate',
                 lambda *args:
@@ -332,14 +336,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.amplifier_gain_initialized = False
         if len(DMFControlBoardPlugin.serial_ports_):
             app_values = self.get_app_values()
+            print app_values
             # try to connect to the last successful port
             try:
                 self.control_board.connect(str(app_values['serial_port']),
                     app_values['baud_rate'])
             except Exception, why:
                 logger.warning('Could not connect to control board on port %s.'
-                               ' Checking other ports...' %
-                               app_values['serial_port'])
+                               ' Checking other ports... [%s]' %
+                               (app_values['serial_port'], why))
                 self.control_board.connect(baud_rate=app_values['baud_rate'])
             app_values['serial_port'] = self.control_board.port
             self.set_app_values(app_values)
