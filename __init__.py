@@ -182,10 +182,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.watchdog_timeout_id = None
 
         self.menu_actions = [('Calibration',
-                              ['Load from file',
-                               'Calibrate reference load',
+                              ['Calibrate reference load',
+                               'Open reference load calibration',
                                'Calibrate device load',
-                               'Fit from file']),
+                               'Open device load calibration']),
                              ('Configuration',
                               ['Reset to default values',
                                'Edit settings',
@@ -276,14 +276,20 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             menu['Calibrate reference load'][0].connect(
                 'activate',
                 self.feedback_calibration_controller.on_perform_calibration)
+            menu['Open reference load calibration'][0].connect(
+                'activate',
+                lambda *args:
+                self.feedback_calibration_controller
+                .load_reference_calibration())
             menu['Calibrate device load'][0].connect(
                 'activate',
                 lambda *args: self.feedback_calibration_controller
                 .calibrate_impedance())
-            menu['Fit from file'][0].connect(
+            menu['Open device load calibration'][0].connect(
                 'activate',
                 lambda *args:
-                self.feedback_calibration_controller.fit_feedback_params())
+                self.feedback_calibration_controller
+                .load_impedance_calibration())
 
             self.initialized = True
 

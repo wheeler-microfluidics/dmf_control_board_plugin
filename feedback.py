@@ -33,6 +33,7 @@ import pandas as pd
 import matplotlib
 import matplotlib.mlab as mlab
 from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 from path_helpers import path
 import scipy.optimize as optimize
 from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
@@ -56,9 +57,8 @@ from dmf_control_board.gui.reference import (AssistantView as
                                              ReferenceAssistantView)
 from dmf_control_board.gui.impedance import (AssistantView as
                                              ImpedanceAssistantView)
-from dmf_control_board.calibrate.hv_attenuator import (
-    resistor_max_actuation_readings, fit_feedback_params,
-    update_control_board_calibration, plot_feedback_params)
+from dmf_control_board.calibrate.hv_attenuator import plot_feedback_params
+from dmf_control_board.calibrate.impedance_benchmarks import plot_stat_summary
 
 
 class MicrodropReferenceAssistantView(ReferenceAssistantView):
@@ -1598,7 +1598,7 @@ class FeedbackCalibrationController():
 
         self.calibrate_attenuators()
 
-    def load_feedback_params(self):
+    def load_reference_calibration(self):
         dialog = gtk.FileChooserDialog(
             title="Load reference calibration readings from file",
             action=gtk.FILE_CHOOSER_ACTION_OPEN,
@@ -1612,25 +1612,16 @@ class FeedbackCalibrationController():
         filename = dialog.get_filename()
         dialog.destroy()
 
-        if response == gtk.RESPONSE_OK:
+        if response != gtk.RESPONSE_OK:
+            return
+
+        try:
             hv_readings = pd.read_hdf(str(filename),
-                                      '/feedback/reference/measurements')
-            try:
-                fitted_params = pd.read_hdf(str(filename),
-                                            '/feedback/reference/fitted_params')
-            except KeyError:
-                try:
-                    # Using the collected measurements, fit the resistive and
-                    # *(parasitic)* capacitive load values for the reference *(i.e.,
-                    # high-voltage)* feedback resistor ladder.
-                    fitted_params = fit_feedback_params(self.plugin.control_board
-                                                        .calibration, hv_readings)
-                except (TypeError, ), why:
-                    logging.error('Error performing fit: %s' % why)
-                    return
+                                        '/feedback/reference/measurements')
+            fitted_params = pd.read_hdf(str(filename),
+                                        '/feedback/reference/fitted_params')
 
-
-            figure = Figure(figsize=(10, 8), dpi=72)
+            figure = Figure(figsize=(14, 8), dpi=60)
             axis = figure.add_subplot(111)
 
             plot_feedback_params(self.plugin.control_board.calibration
@@ -1649,6 +1640,48 @@ class FeedbackCalibrationController():
             window.show_all()
 
             logging.info(str(fitted_params))
+        except KeyError:
+            logging.error('Error loading reference calibration data.')
+            return
+
+    def load_impedance_calibration(self):
+        dialog = gtk.FileChooserDialog(
+            title="Load device load calibration readings from file",
+            action=gtk.FILE_CHOOSER_ACTION_OPEN,
+            buttons=(gtk.STOCK_CANCEL,
+                     gtk.RESPONSE_CANCEL,
+                     gtk.STOCK_OPEN,
+                     gtk.RESPONSE_OK)
+        )
+        dialog.set_default_response(gtk.RESPONSE_OK)
+        response = dialog.run()
+        filename = dialog.get_filename()
+        dialog.destroy()
+
+        if response != gtk.RESPONSE_OK:
+            return
+
+        try:
+            measurements = pd.read_hdf(str(filename),
+                                       '/feedback/impedance/measurements')
+
+            figure = Figure(figsize=(14, 14), dpi=60)
+
+            plot_stat_summary(measurements, fig=figure)
+
+            window = gtk.Window()
+            window.set_default_size(800, 600)
+            window.set_title('Impedance feedback measurement accuracy')
+            canvas = FigureCanvasGTK(figure)
+            toolbar = NavigationToolbar(canvas, window)
+            vbox = gtk.VBox()
+            vbox.pack_start(canvas)
+            vbox.pack_start(toolbar, False, False)
+            window.add(vbox)
+            window.show_all()
+        except KeyError:
+            logging.error('Error loading device load calibration data.')
+            return
 
     def calibrate_attenuators(self):
         output_dir = self.plugin.calibrations_dir()
