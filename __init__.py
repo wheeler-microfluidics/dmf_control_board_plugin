@@ -500,19 +500,25 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 response = yesno('File exists. Would you like to overwrite it?')
                 if response != gtk.RESPONSE_YES:
                     return
-            config = self.control_board.read_config()
-            config = dict([(k, v) for k, v in config.iteritems()
-                           if v is not None])
-            for k in config.keys():
-                # Yaml doesn't support serializing numpy scalar types, but the
-                # configuration returned by `read_config` may contain numpy
-                # floating point values.  Therefore, we check and cast each
-                # numpy float as a native Python float.
-                if isinstance(config[k], np.float32):
-                    config[k] = float(config[k])
-            config_str = yaml.dump(config)
-            with filename.open('wb') as output:
-                print >> output, '''
+            self.to_yaml(filename)
+
+    def to_yaml(self, output_path):
+        '''
+        Write control board configuration to a YAML output file.
+        '''
+        config = self.control_board.read_config()
+        config = dict([(k, v) for k, v in config.iteritems()
+                        if v is not None])
+        for k in config.keys():
+            # Yaml doesn't support serializing numpy scalar types, but the
+            # configuration returned by `read_config` may contain numpy
+            # floating point values.  Therefore, we check and cast each
+            # numpy float as a native Python float.
+            if isinstance(config[k], np.float32):
+                config[k] = float(config[k])
+        config_str = yaml.dump(config)
+        with open(output_path, 'wb') as output:
+            print >> output, '''
 # DropBot DMF control-board configuration
 # =======================================
 #'
@@ -522,7 +528,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 # [1]: http://microfluidics.utoronto.ca/trac/dropbot/ticket/41#ticket
 # [2]: http://microfluidics.utoronto.ca/trac/dropbot
 # [3]: http://microfluidics.utoronto.ca'''.strip()
-                print >> output, config_str
+            print >> output, config_str
 
     def on_edit_configuration(self, widget=None, data=None):
         '''
