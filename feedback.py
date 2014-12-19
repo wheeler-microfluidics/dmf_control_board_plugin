@@ -29,11 +29,11 @@ except ImportError:
 
 import gtk
 import numpy as np
+import pandas as pd
 import matplotlib
 import matplotlib.mlab as mlab
-if os.name == 'nt':
-    matplotlib.rc('font', **{'family': 'sans-serif', 'sans-serif': ['Arial']})
 from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 from path_helpers import path
 import scipy.optimize as optimize
 from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
@@ -50,9 +50,13 @@ from flatland.validation import ValueAtLeast
 from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
-from dmf_control_board import FeedbackCalibration, FeedbackResults, \
-    FeedbackResultsSeries
 from microdrop.plugin_helpers import get_plugin_info
+from dmf_control_board import (FeedbackCalibration, FeedbackResults,
+                               FeedbackResultsSeries)
+from dmf_control_board.calibrate.hv_attenuator import plot_feedback_params
+from dmf_control_board.calibrate.impedance_benchmarks import plot_stat_summary
+from .wizards import (MicrodropImpedanceAssistantView,
+                      MicrodropReferenceAssistantView)
 
 
 class AmplifierGainNotCalibrated(Exception):
@@ -119,7 +123,7 @@ class SweepFrequencyAction():
                  start_frequency=None,
                  end_frequency=None,
                  n_frequency_steps=None):
-        
+
         service = get_service_instance_by_name(
             get_plugin_info(path(__file__).parent).plugin_name)
 
@@ -346,7 +350,7 @@ class FeedbackOptionsController():
         capacitance = np.mean(results.capacitance())
         logging.info('mean(capacitance) = %e F (%e F/mm^2)' % \
                      (capacitance, capacitance / area))
-        
+
         # set the frequency back to it's original state
         emit_signal("set_frequency",
                     dmf_options.frequency,
@@ -1050,8 +1054,8 @@ class FeedbackResultsController():
                         get_data('microdrop.gui.dmf_device_controller'). \
                         state_of_channels
                     area = dmf_device.actuated_area(state_of_channels)
-                    results.area = area 
-                    
+                    results.area = area
+
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
                         normalization = area
@@ -1322,7 +1326,7 @@ class FeedbackResultsController():
                 self.axis.legend(handles, legend, loc=legend_loc)
             else:
                 self.axis.legend(legend, loc=legend_loc)
-            
+
         self.figure.subplots_adjust(left=0.17, bottom=0.15)
         self.canvas.draw()
 
@@ -1434,7 +1438,7 @@ class FeedbackCalibrationController():
             data = None
             if self.plugin.name not in row.keys():
                 continue
-            
+
             if 'FeedbackResults' in row[self.plugin.name]:
                 data = row[self.plugin.name]['FeedbackResults']
             elif 'FeedbackResultsSeries' in row[self.plugin.name]:
@@ -1445,7 +1449,7 @@ class FeedbackCalibrationController():
 
             calibration_list.append(data.calibration)
             frequency = data.frequency
-            
+
             # There is a calibration result entry in this row, and it has been
             # added to the end of `calibration_list`.  Therefore, to retrieve
             # it, we retrieve the last item in `calibration_list`.
@@ -1566,596 +1570,136 @@ class FeedbackCalibrationController():
                           "perform calibration.")
             return
 
-        response = yesno('''
-# High-voltage attenuation calibration #
+        self.calibrate_attenuators()
 
-Would you like to [calibrate the high voltage attenuators][1]?
+    def load_reference_calibration(self):
+        dialog = gtk.FileChooserDialog(
+            title="Load reference calibration readings from file",
+            action=gtk.FILE_CHOOSER_ACTION_OPEN,
+            buttons=(gtk.STOCK_CANCEL,
+                     gtk.RESPONSE_CANCEL,
+                     gtk.STOCK_OPEN,
+                     gtk.RESPONSE_OK)
+        )
+        dialog.set_default_response(gtk.RESPONSE_OK)
+        dialog.set_current_folder(self.plugin.calibrations_dir())
+        response = dialog.run()
+        filename = dialog.get_filename()
+        dialog.destroy()
 
-Click no to keep current values.
+        if response != gtk.RESPONSE_OK:
+            return
 
-[1]: http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20cali\
-bration#high-voltage-attenuation-calibration'''.strip())
-        if response == gtk.RESPONSE_YES:
-            self.calibrate_attenuators()
+        try:
+            hv_readings = pd.read_hdf(str(filename),
+                                        '/feedback/reference/measurements')
+            fitted_params = pd.read_hdf(str(filename),
+                                        '/feedback/reference/fitted_params')
 
-        response = yesno('''
-# Feedback resistors calibration #
+            figure = Figure(figsize=(14, 8), dpi=60)
+            axis = figure.add_subplot(111)
 
-Would you like to calibrate the feedback resistors?
+            plot_feedback_params(self.plugin.control_board.calibration
+                                 .hw_version.major, hv_readings, fitted_params,
+                                 axis=axis)
 
-Please note that you must have an electrode covered by a drop and that
-electrode should be actuated.
+            window = gtk.Window()
+            window.set_default_size(800, 600)
+            window.set_title('Fitted reference feedback parameters')
+            canvas = FigureCanvasGTK(figure)
+            toolbar = NavigationToolbar(canvas, window)
+            vbox = gtk.VBox()
+            vbox.pack_start(canvas)
+            vbox.pack_start(toolbar, False, False)
+            window.add(vbox)
+            window.show_all()
 
-If the device is not ready, press \"No\", setup the drop and relaunch the
-calibration wizard.'''.strip())
+            logging.info(str(fitted_params))
+        except KeyError:
+            logging.error('Error loading reference calibration data.')
+            return
 
-        if response == gtk.RESPONSE_YES:
-            self.calibrate_feedback_resistors()
+    def load_impedance_calibration(self):
+        dialog = gtk.FileChooserDialog(
+            title="Load device load calibration readings from file",
+            action=gtk.FILE_CHOOSER_ACTION_OPEN,
+            buttons=(gtk.STOCK_CANCEL,
+                     gtk.RESPONSE_CANCEL,
+                     gtk.STOCK_OPEN,
+                     gtk.RESPONSE_OK)
+        )
+        dialog.set_default_response(gtk.RESPONSE_OK)
+        dialog.set_current_folder(self.plugin.calibrations_dir())
+        response = dialog.run()
+        filename = dialog.get_filename()
+        dialog.destroy()
+
+        if response != gtk.RESPONSE_OK:
+            return
+
+        try:
+            measurements = pd.read_hdf(str(filename),
+                                       '/feedback/impedance/measurements')
+
+            figure = Figure(figsize=(14, 14), dpi=60)
+
+            plot_stat_summary(measurements, fig=figure)
+
+            window = gtk.Window()
+            window.set_default_size(800, 600)
+            window.set_title('Impedance feedback measurement accuracy')
+            canvas = FigureCanvasGTK(figure)
+            toolbar = NavigationToolbar(canvas, window)
+            vbox = gtk.VBox()
+            vbox.pack_start(canvas)
+            vbox.pack_start(toolbar, False, False)
+            window.add(vbox)
+            window.show_all()
+        except KeyError:
+            logging.error('Error loading device load calibration data.')
+            return
 
     def calibrate_attenuators(self):
-        frequencies, valid = self.prompt_for_frequency_range()
-        if not valid:
-            return
+        output_dir = self.plugin.calibrations_dir()
+        if not output_dir.isdir():
+            output_dir.makedirs_p()
 
-        app = get_app()
-        app.main_window_controller.info('''
-# High-voltage attenuation calibration #
+        view = MicrodropReferenceAssistantView(self.plugin.control_board)
 
-The control board uses a bank of resistors to measure amplifier voltage. These
-resistors need to be characterized in order to obtain accurate measurements.
-See the [DropBot documentation][1] for more details.
-
-Using an oscilloscope, please measure the output from your amplifier and answer
-the following prompts.
-
-[1]: http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20cali\
-bration#high-voltage-attenuation-calibration'''.strip(),
-                                        'HV attenuator calibration wizard')
-
-        results = self.sweep_frequencies(frequencies,
-                                         input_voltage=None,
-                                         measure_with_scope=True,
-                                         autoscale_voltage=True)
-
-        if results:
-            # Save the persistent configuration settings from the control-board
-            # to a file.
-            self.plugin.save_config()
-            self.plugin.calibrations_dir().makedirs_p()
+        def on_calibrated(assistant):
             timestamp = datetime.now().strftime('%Y-%m-%dT%Hh%Mm%S')
-            calibration_file = (self.plugin.calibrations_dir()
-                                .joinpath('%s-hv_calibration.pickled.dat' %
-                                          timestamp))
-            with open(calibration_file, 'wb') as output:
-                try:
-                    pickle.dump(results, output)
-                except Exception, why:
-                    logging.error("Error saving calibration file. %s." % why)
-            self.process_hv_calibration(results)
+            prefix = '[%05d]-%s-' % (self.plugin.control_board.serial_number,
+                                     timestamp)
+            self.plugin.to_yaml(output_dir.joinpath(prefix + 'config.yml'))
 
-    def prompt_for_frequency_range(self, title="Perform calibration"):
-        form = Form.of(
-            Integer.named('start_frequency').using(
-                default=1e2, optional=True,
-                validators=[ValueAtLeast(minimum=99), ]),
-            Integer.named('end_frequency').using(
-                default=30e3, optional=True,
-                validators=[ValueAtLeast(minimum=1e3), ]),
-            Integer.named('number_of_steps').using(
-                default=10, optional=True,
-                validators=[ValueAtLeast(minimum=0), ]),
-        )
-        dialog = FormViewDialog()
-        valid, response = dialog.run(form)
-        start_frequency = np.array(response['start_frequency'])
-        end_frequency = np.array(response['end_frequency'])
-        number_of_steps = np.array(response['number_of_steps'])
-        frequencies = np.logspace(np.log10(start_frequency),
-                                  np.log10(end_frequency),
-                                  number_of_steps)
-        return frequencies, valid
+            output_path = output_dir.joinpath(prefix + 'calibration.h5')
+            view.to_hdf(output_path)
+            self.calibrate_impedance(output_path)
 
-    def calibrate_feedback_resistors(self):
-        app = get_app()
-        state = app.dmf_device_controller.get_step_options().state_of_channels
-        options = self.plugin.get_default_step_options()
-        if len(mlab.find(state > 0)) == 0:
-            logging.error("Can't calibrate feedback resistors because no "
-                          "electrodes are on.")
-            return
-        else:
-            max_channels = self.plugin.control_board.number_of_channels()
-            if len(state) > max_channels:
-                state = state[0:max_channels]
-            elif len(state) < max_channels:
-                state = np.concatenate([state, np.zeros(max_channels -
-                                                        len(state), int)])
-            else:
-                assert(len(state) == max_channels)
+        # Save the persistent configuration settings from the control-board to
+        # a file upon successful calibration.
+        view.widget.connect('close', on_calibrated)
+        view.show()
 
-        frequencies, valid = self.prompt_for_frequency_range()
-        if not valid:
-            return
-        n_samples = 1000
-        calibration = self.plugin.control_board.calibration
-        V_hv = np.zeros([len(frequencies), len(calibration.R_fb)])
-        V_fb = np.zeros([len(frequencies), len(calibration.R_fb)])
-        app_values = self.plugin.get_app_values()
+    def calibrate_impedance(self, output_path=None):
+        output_dir = self.plugin.calibrations_dir()
+        if not output_dir.isdir():
+            output_dir.makedirs_p()
 
-        for i, frequency in enumerate(frequencies):
-            options.frequency = frequency
-            sampling_window_ms = int(max(1000.0 / frequency * 5, 10))
-            options.duration = 10 * sampling_window_ms
-            emit_signal("set_frequency", frequency,
-                        interface=IWaveformGenerator)
-            for j in range(0, len(calibration.R_fb)):
-                logging.info("set_series_resistor_index(1, %d)" % j)
-                self.plugin.control_board.set_series_resistor_index(1, j)
-                # Start with the minimum voltage.
-                options.voltage = 2.0
-                while True:
-                    emit_signal("set_voltage", options.voltage,
-                                interface=IWaveformGenerator)
-                    (v_hv, hv_resistor, v_fb, fb_resistor) = (
-                        self.plugin.measure_impedance(
-                            sampling_window_ms,
-                            int(math.ceil(options.duration /
-                                          sampling_window_ms)),
-                            app_values['delay_between_windows_ms'], state))
+        view = MicrodropImpedanceAssistantView(self.plugin.control_board)
 
-                    results = FeedbackResults(options, sampling_window_ms,
-                                              app_values
-                                              ['delay_between_windows_ms'],
-                                              v_hv, hv_resistor, v_fb,
-                                              fb_resistor,
-                                              self.plugin.control_board
-                                              .calibration, 0)
-                    logging.info("gain=%.1f" % self.plugin.control_board
-                                 .amplifier_gain)
-                    V_hv[i, j] = np.mean(results.V_total()[5:])
-
-                    time.sleep(.1)
-
-                    V = (self.plugin.control_board.analog_reads(1, n_samples) /
-                         1023.0 * 5 - 2.5)
-                    V_rms = (np.max(V) - np.min(V)) / 2 / np.sqrt(2)
-                    logging.info("V_rms =% .1f" % V_rms)
-                    # TODO check for max voltage (or catch errors when setting
-                    # voltage)
-                    if V_rms < .3 and options.voltage < 400.0 / 2:
-                        logging.info("double voltage")
-                        options.voltage *= 2
-                    else:
-                        V_fb[i, j] = V_rms
-                        break
-
-        results = dict(V_hv=V_hv.tolist(),
-                       frequencies=frequencies.tolist(),
-                       V_fb=V_fb.tolist())
-
-        if results:
-            # Save the persistent configuration settings from the control-board
-            # to a file.
-            self.plugin.save_config()
-            self.plugin.calibrations_dir().makedirs_p()
+        def on_calibrated(output_path, assistant):
             timestamp = datetime.now().strftime('%Y-%m-%dT%Hh%Mm%S')
-            calibration_file = (self.plugin.calibrations_dir()
-                                .joinpath('%s-fb_calibration.pickled.dat' %
-                                          timestamp))
-            with open(calibration_file, 'wb') as output:
-                try:
-                    pickle.dump(results, output)
-                except Exception, why:
-                    logging.error("Error saving calibration file. %s." % why)
-            self.process_fb_calibration(results)
+            prefix = '[%05d]-%s-' % (self.plugin.control_board.serial_number,
+                                     timestamp)
+            self.plugin.to_yaml(output_dir.joinpath(prefix + 'config.yml'))
+            if output_path is None:
+                output_path = output_dir.joinpath(prefix +
+                                                  'calibration-load.h5')
+            view.to_hdf(output_path)
 
-    def sweep_frequencies(self,
-                          frequencies,
-                          input_voltage=None,
-                          measure_with_scope=False,
-                          autoscale_voltage=True):
-        n_samples = 1000
-        n_attenuation_steps = len(self.plugin.control_board.calibration.R_hv)
-
-        if input_voltage is None:
-            input_voltage = .1 * np.ones([n_attenuation_steps,
-                                          len(frequencies)])
-
-        if measure_with_scope:
-            voltages = np.zeros([n_attenuation_steps,
-                                len(frequencies)])
-
-        hv_measurements = np.zeros([n_attenuation_steps,
-                                    len(frequencies),
-                                    n_samples])
-        gain = self.plugin.control_board.amplifier_gain
-        self.plugin.control_board.amplifier_gain = 1.0
-
-        for i in range(0, n_attenuation_steps):
-            self.plugin.control_board.set_series_resistor_index(0, i)
-            for j, frequency in enumerate(frequencies):
-                emit_signal("set_voltage", input_voltage[i, j],
-                            interface=IWaveformGenerator)
-                emit_signal("set_frequency", frequency,
-                            interface=IWaveformGenerator)
-
-                # adjust reference voltage so that we are reading ~1.4 Vrms
-                if autoscale_voltage:
-                    while True:
-                        logging.info('set_voltage(%.5f)' % input_voltage[i, j])
-                        emit_signal("set_voltage", input_voltage[i, j],
-                                    interface=IWaveformGenerator)
-                        # wait for the signal to settle
-                        time.sleep(.1)
-                        V = (np.array(self.plugin.control_board
-                                      .analog_reads(0, n_samples)) / 1023.0 * 5
-                             - 2.5)
-                        V_rms = np.sqrt(np.mean(V ** 2) - np.mean(V) ** 2)
-                        logging.info("V_rms=%.1f" % V_rms)
-                        if V_rms > 1.3:
-                            logging.info("divide input voltage by 2")
-                            input_voltage[i, j] /= 2
-                        # Maximum of waveform generator is `~4Vpp = sqrt(2)`
-                        # Vrms.
-                        elif V_rms < .5 and (input_voltage[i, j] < np.sqrt(2) /
-                                             2):
-                            logging.info("multiply input voltage by 2")
-                            input_voltage[i, j] *= 2
-                        else:
-                            logging.info("input voltage set to %.1f" %
-                                         input_voltage[i, j])
-                            break
-
-                if measure_with_scope:
-                    while True:
-                        voltage = text_entry_dialog("What is the current RMS "
-                                                    "output voltage?",
-                                                    title="Feedback "
-                                                    "calibration wizard")
-                        # cancel calibration
-                        if voltage is None:
-                            get_app().main_window_controller.info(
-                                "Calibration cancelled.",
-                                "Feedback calibration wizard")
-                            return
-                        # check that it is a valid voltage
-                        elif is_float(voltage):
-                            voltages[i, j] = float(voltage)
-                            break
-                        # try again
-                        else:
-                            logging.error("Not a valid float.")
-
-                hv_measurements[i, j, :] = (self.plugin.control_board
-                                            .analog_reads(0, n_samples))
-
-        # reset amplifier gain to previous value
-        self.plugin.control_board.set_amplifier_gain(gain)
-
-        results = dict(input_voltage=input_voltage.tolist(),
-                       frequencies=frequencies.tolist(),
-                       hv_measurements=hv_measurements.tolist())
-
-        if measure_with_scope:
-            results['voltages'] = voltages.tolist()
-        return results
-
-    def process_fb_calibration(self, results):
-        calibration = self.plugin.control_board.calibration
-        frequencies = np.array(results['frequencies'])
-        V_hv = np.array(results['V_hv'])
-        V_fb = np.array(results['V_fb'])
-
-        voltage_filter = [.1, 1.3]
-        # only include data points where the voltage falls within a specified
-        # range
-        x, y = np.nonzero(np.logical_or(V_fb < voltage_filter[0],
-                                        V_fb > voltage_filter[1]))
-        V_fb[x, y] = 0
-
-        schema_entries = []
-        for i in range(len(self.plugin.control_board.calibration.R_fb)):
-            schema_entries.append(
-                Boolean.named('Fit R_fb_%d' % i).using(
-                    default=True, optional=True))
-            schema_entries.append(
-                Boolean.named('Fit C_fb_%d' % i).using(
-                    default=True, optional=True))
-        schema_entries.append(
-            Float.named('C_device_pF').using(default=1, optional=True))
-
-        form = Form.of(*schema_entries)
-        dialog = FormViewDialog('Fit paramters')
-        valid, response = dialog.run(form)
-
-        # fit parameters
-        C_device = response['C_device_pF'] * 1e-12
-        p0 = np.concatenate((calibration.R_fb, calibration.C_fb))
-
-        def e(p0, V_hv, V_fb, frequencies, C):
-            R_fb = []
-            for i in range(0, len(p0) / 2):
-                R_fb.append((p0[i] * np.ones(V_fb.shape[0])).tolist())
-            R_fb = np.abs(np.array(R_fb).transpose())
-            C_fb = []
-            for i in range(len(p0) / 2, len(p0)):
-                C_fb.append((p0[i] * np.ones(V_fb.shape[0])).tolist())
-            C_fb = np.abs(np.array(C_fb).transpose())
-            f = np.tile(np.reshape(frequencies, (len(frequencies), 1)),
-                        (1, V_fb.shape[1]))
-            if calibration.hw_version.major == 1:
-                error = (V_fb - V_hv * R_fb * C * 2 * np.pi * f /
-                         np.sqrt(1 + np
-                                 .square(2 * np.pi * R_fb * (C_fb + C) * f)))
-            else:
-                error = (V_fb - V_hv * R_fb * C * 2 * np.pi * f /
-                         np.sqrt(1 + np.square(2 * np.pi * R_fb * C_fb * f)))
-                return error.flatten()[mlab.find(np.logical_and(V_hv.flatten(),
-                                                                V_fb
-                                                                .flatten()))]
-
-        p1, cov_x, infodict, mesg, ier = optimize.leastsq(
-            e,
-            p0,
-            args=(V_hv, V_fb, frequencies, C_device),
-            full_output=True
-        )
-        p1 = np.abs(p1)
-
-        logging.info("p0=%s" % p0)
-        logging.info("SOS before=%s" % np.sum(e(p0, V_hv, V_fb, frequencies,
-                                                C_device) ** 2))
-        logging.info("p1=%s" % p1)
-        logging.info(mesg)
-        logging.info("SOS after=%s" % np.sum(e(p1, V_hv, V_fb, frequencies,
-                                               C_device) ** 2))
-        logging.info("diff =%s" % (p1 - p0))
-
-        canvas, a = self.create_plot('residuals')
-        legend = []
-        a.plot(e(p1, V_hv, V_fb, frequencies, C_device), 'o')
-        a.set_xlabel('data point')
-        a.set_ylabel('residual')
-        a.set_title('Residuals from fit')
-        canvas.draw()
-
-        Z_0 = self.device_impedance(p0, V_hv, V_fb, frequencies)
-
-        canvas, a = self.create_plot('V_hv')
-        legend = []
-        for i in range(Z_0.shape[1]):
-            ind = mlab.find(np.logical_and(V_hv[:, i], V_fb[:, i]))
-            if len(ind):
-                legend.append("R$_{fb,%d}$" % i)
-                a.semilogx(frequencies[ind], V_hv[ind, i], 'o')
-        a.legend(legend)
-        a.set_xlabel('Frequency (Hz)')
-        a.set_ylabel('V$_{hv}$ (V$_{RMS}$)')
-        a.set_title('V$_{hv}$')
-        canvas.draw()
-
-        canvas, a = self.create_plot('V_fb')
-        legend = []
-        for i in range(Z_0.shape[1]):
-            ind = mlab.find(np.logical_and(V_hv[:, i], V_fb[:, i]))
-            if len(ind):
-                legend.append("R$_{fb,%d}$" % i)
-                a.semilogx(frequencies[ind], V_fb[ind, i], 'o')
-        a.legend(legend)
-        a.set_xlabel('Frequency (Hz)')
-        a.set_ylabel('V$_{fb}$ (V$_{RMS}$)')
-        a.set_title('V$_{fb}$')
-        canvas.draw()
-
-        canvas, a = self.create_plot('Device impedance')
-        legend = []
-        for i in range(Z_0.shape[1]):
-            ind = mlab.find(np.logical_and(V_hv[:, i], V_fb[:, i]))
-            if len(ind):
-                legend.append("R$_{fb,%d}$" % i)
-                a.loglog(frequencies[ind], Z_0[ind, i], 'o')
-        a.plot(frequencies, 1 / (2 * np.pi * C_device * frequencies), 'k -- ')
-        a.legend(legend)
-        a.set_xlabel('Frequency (Hz)')
-        a.set_ylabel('Z$_{device}$ ($\Omega$)')
-        a.set_title('Z$_{device}$')
-        canvas.draw()
-
-        canvas, a = self.create_plot('Device capacitance')
-        legend = []
-        for i in range(Z_0.shape[1]):
-            ind = mlab.find(np.logical_and(V_hv[:, i], V_fb[:, i]))
-            if len(ind):
-                legend.append("R$_{fb,%d}$" % i)
-                a.semilogx(frequencies[ind], 1e12 / (Z_0[ind, i] *
-                                                     frequencies[ind] * 2 *
-                                                     np.pi), 'o')
-        a.plot(frequencies, C_device * np.ones(frequencies.shape), 'k--')
-        a.legend(legend)
-        a.set_xlabel('Frequency (Hz)')
-        a.set_ylabel('C$_{device}$ (pF)')
-        a.set_title('C$_{device}$')
-        canvas.draw()
-
-        Z_1 = self.device_impedance(p1, V_hv, V_fb, frequencies)
-
-        canvas, a = self.create_plot('Device impedance (after fit)')
-        legend = []
-        for i in range(Z_1.shape[1]):
-            ind = mlab.find(np.logical_and(V_hv[:, i], V_fb[:, i]))
-            if len(ind):
-                legend.append("R$_{fb,%d}$" % i)
-                a.loglog(frequencies[ind], Z_1[ind, i], 'o')
-        a.plot(frequencies, 1 / (2 * np.pi * C_device * frequencies), 'k -- ')
-        a.legend(legend)
-        a.set_xlabel('Frequency (Hz)')
-        a.set_ylabel('Z$_{device}$ ($\Omega$)')
-        a.set_title('Z$_{device}$ (after fit)')
-        canvas.draw()
-
-        canvas, a = self.create_plot('Device capacitance (after fit)')
-        legend = []
-        for i in range(Z_1.shape[1]):
-            ind = mlab.find(np.logical_and(V_hv[:, i], V_fb[:, i]))
-            if len(ind):
-                legend.append("R$_{fb,%d}$" % i)
-                a.semilogx(frequencies[ind], 1e12 / (Z_1[ind, i] *
-                                                     frequencies[ind] * 2 *
-                                                     np.pi), 'o')
-        a.plot(frequencies, C_device * np.ones(frequencies.shape), 'k -- ')
-        a.legend(legend)
-        a.set_xlabel('Frequency (Hz)')
-        a.set_ylabel('C$_{device}$ (pF)')
-        a.set_title('C$_{device}$ (after fit)')
-        canvas.draw()
-
-        canvas, a = self.create_plot('V_fb/V_hv')
-        legend = []
-        colors = ['b', 'g', 'r', 'c', 'm']
-        color_index = 0
-        for i in range(Z_1.shape[1]):
-            ind = mlab.find(np.logical_and(V_hv[:, i], V_fb[:, i]))
-            if len(ind):
-                legend.append("R$_{fb,%d}$" % i)
-                a.loglog(frequencies[ind], V_fb[ind, i] / V_hv[ind, i],
-                         colors[color_index] + 'o')
-                color_index += 1
-        color_index = 0
-        for i in range(Z_1.shape[1]):
-            ind = mlab.find(np.logical_and(V_hv[:, i], V_fb[:, i]))
-            if len(ind):
-                R_fb = p1[0 + i]
-                C_fb = p1[len(calibration.R_fb) + i]
-                if self.plugin.control_board.calibration.hw_version.major == 1:
-                    a.plot(frequencies[ind], R_fb * C_device * 2 * np.pi *
-                           frequencies[ind] /
-                           np.sqrt(1 + np.square(2 * np.pi * R_fb * (C_fb +
-                                                                     C_device)
-                                                 * frequencies[ind])),
-                           colors[i] + '- - ')
-                else:
-                    a.plot(frequencies[ind], R_fb * C_device * 2 * np.pi *
-                           frequencies[ind] /
-                           np.sqrt(1 + np.square(2 * np.pi * R_fb * C_fb *
-                                                 frequencies[ind])),
-                           colors[color_index] + '- - ')
-                color_index += 1
-        a.legend(legend)
-        a.set_xlabel('Frequency (Hz)')
-        a.set_ylabel('V$_{fb}$/V$_{hv}$')
-        a.set_title('V$_{fb}$ / V$_{hv}$ for a %.1fpF load' % (C_device *
-                                                               1e12))
-        canvas.draw()
-
-        # write new calibration parameters to the control board
-        for i in range(0, len(calibration.R_fb)):
-            self.plugin.control_board.set_series_resistor_index(1, i)
-            self.plugin.control_board.set_series_resistance(1, p1[i])
-            self.plugin.control_board.set_series_capacitance(
-                1, p1[len(calibration.R_fb) + i])
-        # reconnect to update settings
-        self.plugin.control_board.connect()
-
-    def device_impedance(self, p0, V_hv, V_fb, frequencies):
-        R_fb = []
-        for i in range(0, len(p0) / 2):
-            R_fb.append((p0[i] * np.ones(V_fb.shape[0])).tolist())
-        R_fb = np.array(R_fb).transpose()
-        C_fb = []
-        for i in range(len(p0) / 2, len(p0)):
-            C_fb.append((p0[i] * np.ones(V_fb.shape[0])).tolist())
-        C_fb = np.array(C_fb).transpose()
-        f = np.tile(np.reshape(frequencies, (len(frequencies), 1)),
-                    (1, V_fb.shape[1]))
-        if self.plugin.control_board.calibration.hw_version.major == 1:
-            return (R_fb / np.sqrt(1 + np.square(2 * np.pi * R_fb * C_fb * f))
-                    * (V_hv / V_fb - 1))
-        else:
-            return (R_fb / np.sqrt(1 + np.square(2 * np.pi * R_fb * C_fb * f))
-                    * (V_hv / V_fb))
-
-    def process_hv_calibration(self, results):
-        hardware_version = Version.fromstring(self.plugin.control_board
-                                              .hardware_version())
-        input_voltage = np.array(results['input_voltage'])
-        frequencies = np.array(results['frequencies'])
-        hv_measurements = (np.array(results['hv_measurements']) / 1023.0 * 5 -
-                           2.5)
-        hv_rms = np.transpose(np.array([np.max(hv_measurements[:, j, :], 1) -
-                                        np.min(hv_measurements[:, j, :], 1)
-                                        for j in range(0, len(frequencies))]) /
-                              2. / np.sqrt(2))
-
-        if 'voltages' in results:
-            voltages = np.array(results['voltages'])
-            attenuation = hv_rms / voltages
-        else:
-            attenuation = hv_rms / input_voltage
-
-        # p[0]=C, p[1]=R2
-        R1 = 10e6
-        f = lambda p, x, R1: np.abs(1 / (R1 / p[1] + 1 + R1 * 2 * np.pi * p[0]
-                                         * complex(0, 1) * x))
-        if hardware_version.major == 2:
-            f = lambda p, x, R1: np.abs(1 / (R1 / p[1] + R1 * 2 * np.pi * p[0]
-                                             * complex(0, 1) * x))
-        e = lambda p, x, y, R1: f(p, x, R1) - y
-        fit_params = []
-
-        canvas, a = self.create_plot('HV attenuation')
-        colors = ['b', 'r', 'g']
-        legend = []
-        for i in range(0, np.size(hv_rms, 0)):
-            ind = mlab.find(hv_rms[i, :] > .1)
-            p0 = [self.plugin.control_board.calibration.C_hv[i],
-                  self.plugin.control_board.calibration.R_hv[i]]
-            a.loglog(frequencies[ind], f(p0, frequencies[ind], R1),
-                     colors[i] + '--')
-            legend.append('R$_{%d}$ (previous fit)' % i)
-
-            if 'voltages' in results:
-                voltages = np.array(results['voltages'])
-                T = attenuation[i, ind]
-                p1, success = optimize.leastsq(e, p0, args=(frequencies[ind],
-                                                            T, R1))
-                fit_params.append(p1)
-                a.loglog(frequencies[ind], f(p1, frequencies[ind], R1),
-                         colors[i] + '-')
-                legend.append('R$_{%d}$ (new fit)' % i)
-
-                a.plot(frequencies, attenuation[i], colors[i] + 'o')
-                legend.append('R$_{%d}$ (scope measurements)' % i)
-
-                # update control board calibration
-                self.plugin.control_board.set_series_resistor_index(0, i)
-                self.plugin.control_board.set_series_resistance(0, abs(p1[1]))
-                self.plugin.control_board.set_series_capacitance(0, abs(p1[0]))
-                # reconnnect to update calibration data
-                self.plugin.control_board.connect()
-            else:  # Control board measurements
-                fit_params.append(p0)
-                a.plot(frequencies, attenuation[i], colors[i] + 'o')
-                legend.append('R$_{%d}$ (CB measurements)' % i)
-
-        a.legend(legend)
-        a.set_xlabel('Frequency (Hz)')
-        a.set_ylabel('Attenuation')
-        a.set_title('HV attenuation')
-        canvas.draw()
-
-    def create_plot(self, title):
-        win = gtk.Window()
-        win.set_default_size(500, 400)
-        win.set_title(title)
-        f = Figure()
-        a = f.add_subplot(111)
-        canvas = FigureCanvasGTK(f)
-        vbox = gtk.VBox(False, 0)
-        win.add(vbox)
-        toolbar = NavigationToolbar(canvas, win)
-        vbox.pack_start(canvas)
-        vbox.pack_start(toolbar, False, False)
-        vbox.show()
-        win.show_all()
-        f.subplots_adjust(left=0.12, bottom=0.16)
-        return (canvas, a)
+        # Save the persistent configuration settings from the control-board to
+        # a file upon successful calibration.
+        view.widget.connect('close', lambda *args: on_calibrated(output_path,
+                                                                 *args))
+        view.show()

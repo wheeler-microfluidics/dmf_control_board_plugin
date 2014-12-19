@@ -46,11 +46,13 @@ from microdrop.app_context import get_app
 from microdrop.dmf_device import DeviceScaleNotSet
 
 from dmf_control_board import DMFControlBoard, FeedbackResultsSeries
-from serial_device import SerialDevice, get_serial_ports
 from feedback import (FeedbackOptions, FeedbackOptionsController,
                       FeedbackCalibrationController,
                       FeedbackResultsController, RetryAction,
                       SweepFrequencyAction, SweepVoltageAction)
+from serial_device import SerialDevice, get_serial_ports
+from nested_structures import apply_depth_first, apply_dict_depth_first
+from .wizards import MicrodropChannelsAssistantView
 
 
 PluginGlobals.push_env('microdrop.managed')
@@ -87,7 +89,7 @@ def max_voltage(element, state):
     if service.control_board.connected() and \
         element.value > service.control_board.max_waveform_voltage:
         return element.errors.append('Voltage exceeds the maximum value '
-                                     '(%d V).' % 
+                                     '(%d V).' %
                                      service.control_board.max_waveform_voltage)
     else:
         return True
@@ -101,9 +103,9 @@ def check_frequency(element, state):
     if service.control_board.connected() and \
         (element.value < service.control_board.min_waveform_frequency or \
         element.value > service.control_board.max_waveform_frequency):
-        return element.errors.append('Frequency is outside of the valid range ' 
-            '(%.1f - %.1f Hz).' % 
-            (service.control_board.min_waveform_frequency, 
+        return element.errors.append('Frequency is outside of the valid range '
+            '(%.1f - %.1f Hz).' %
+            (service.control_board.min_waveform_frequency,
              service.control_board.max_waveform_frequency)
         )
     else:
@@ -146,10 +148,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                         validators=
                                         [ValueAtLeast(minimum=0), ]),
         Float.named('voltage').using(default=100, optional=True,
-                                     validators=[ValueAtLeast(minimum=0), 
+                                     validators=[ValueAtLeast(minimum=0),
                                                  max_voltage]),
         Float.named('frequency').using(default=1e3, optional=True,
-                                       validators=[ValueAtLeast(minimum=0), 
+                                       validators=[ValueAtLeast(minimum=0),
                                                    check_frequency]),
         Boolean.named('feedback_enabled').using(default=True, optional=True),
     )
@@ -179,6 +181,18 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                                            "from file")
         self.timeout_id = None
         self.watchdog_timeout_id = None
+
+        self.menu_actions = ['Test channels...',
+                             ('Calibration',
+                              ['Calibrate reference load',
+                               'Open reference load calibration',
+                               'Calibrate device load',
+                               'Open device load calibration']),
+                             ('Configuration',
+                              ['Reset to default values',
+                               'Edit settings',
+                               'Load from file',
+                               'Save to file'])]
 
     def on_plugin_enable(self):
         if not self.initialized:
@@ -217,39 +231,83 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             self.feedback_options_controller.on_plugin_enable()
 
-            menu_item = gtk.MenuItem("Perform calibration")
-            menu_item.connect("activate",
-                              self.feedback_calibration_controller
-                              .on_perform_calibration)
-            self.control_board_menu.append(menu_item)
-            self.perform_calibration_menu_item = menu_item
-            menu_item.show()
+            def prepare_menu_item(node, parents, children):
+                menu_item = gtk.MenuItem(node)
+                menu_item.show()
 
-            menu_item = gtk.MenuItem("Save configuration to file")
-            menu_item.connect("activate", lambda *a: self.save_config())
-            self.control_board_menu.append(menu_item)
-            self.save_configuration_to_file_menu_item = menu_item
-            menu_item.show()
+                if children:
+                    # The node has children, so we need to create a GTK menu to
+                    # hold the child menu items. We also must create a menu item
+                    # for the label of the sub-menu.
+                    menu = gtk.Menu()
+                    menu_item.set_submenu(menu)
+                    menu.show()
+                    return (menu_item, menu)
+                else:
+                    return (menu_item, None)
 
-            menu_item = gtk.MenuItem("Load configuration from file")
-            menu_item.connect("activate", lambda *a: self.load_config())
-            self.control_board_menu.append(menu_item)
-            self.load_configuration_from_file_menu_item = menu_item
-            menu_item.show()
+            def attach_menu_item(key, node, parents):
+                if parents:
+                    # Extract menu item of nearest parent.
+                    parent_item = parents[-1][1].item[1]
+                else:
+                    # Use main plugin menu as parent.
+                    parent_item = self.control_board_menu
+                parent_item.append(node.item[0])
+                node.item[0].show()
 
-            menu_item = gtk.MenuItem("Edit configuration settings")
-            menu_item.connect("activate",
-                              self.on_edit_configuration)
-            self.control_board_menu.append(menu_item)
-            self.edit_configuration_menu_item = menu_item
-            menu_item.show()
+            # Prepare menu items for layout defined in `self.menu_actions`.
+            self.menu_items = apply_depth_first(self.menu_actions, as_dict=True,
+                                                func=prepare_menu_item)
+            # Attach each menu item to the corresponding parent menu.
+            apply_dict_depth_first(self.menu_items, attach_menu_item)
 
-            menu_item = gtk.MenuItem("Reset configuration to default values")
-            menu_item.connect("activate",
-                              self.on_reset_configuration_to_default_values)
-            self.control_board_menu.append(menu_item)
-            self.reset_configuration_to_default_values_menu_item = menu_item
-            menu_item.show()
+            def test_channels(*args):
+                '''
+                Launch wizard to test actuation of a bank of switches *(i.e.,
+                all switches on a single switching board)*.
+
+                Append results to an [HDF][1] file, where measurements from the
+                same run share a common value in the `timestamp` column.
+                '''
+                view = MicrodropChannelsAssistantView(self.control_board)
+                def on_close(*args):
+                    view.to_hdf(self.calibrations_dir().joinpath('channels.h5'))
+                view.widget.connect('close', on_close)
+                view.show()
+
+            # Connect the action for each menu item to the corresponding
+            # call-back function.
+            self.menu_items['Test channels...'].item[0].connect('activate',
+                                                                test_channels)
+            menu = self.menu_items['Configuration']
+            menu['Edit settings'][0].connect('activate',
+                                             self.on_edit_configuration)
+            menu['Save to file'][0].connect('activate',
+                                            lambda *a: self.save_config())
+            menu['Load from file'][0].connect('activate',
+                                              lambda *a: self.load_config())
+            menu['Reset to default values'][0].connect(
+                'activate', self.on_reset_configuration_to_default_values)
+
+            menu = self.menu_items['Calibration']
+            menu['Calibrate reference load'][0].connect(
+                'activate',
+                self.feedback_calibration_controller.on_perform_calibration)
+            menu['Open reference load calibration'][0].connect(
+                'activate',
+                lambda *args:
+                self.feedback_calibration_controller
+                .load_reference_calibration())
+            menu['Calibrate device load'][0].connect(
+                'activate',
+                lambda *args: self.feedback_calibration_controller
+                .calibrate_impedance())
+            menu['Open device load calibration'][0].connect(
+                'activate',
+                lambda *args:
+                self.feedback_calibration_controller
+                .load_impedance_calibration())
 
             self.initialized = True
 
@@ -302,14 +360,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.amplifier_gain_initialized = False
         if len(DMFControlBoardPlugin.serial_ports_):
             app_values = self.get_app_values()
+            print app_values
             # try to connect to the last successful port
             try:
                 self.control_board.connect(str(app_values['serial_port']),
                     app_values['baud_rate'])
             except Exception, why:
                 logger.warning('Could not connect to control board on port %s.'
-                               ' Checking other ports...' %
-                               app_values['serial_port'])
+                               ' Checking other ports... [%s]' %
+                               (app_values['serial_port'], why))
                 self.control_board.connect(baud_rate=app_values['baud_rate'])
             app_values['serial_port'] = self.control_board.port
             self.set_app_values(app_values)
@@ -374,7 +433,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             connected = self.control_board.connected()
             if not connected:
                 self.connect()
-            response = yesno("Save current calibration settings before "
+            response = yesno("Save current control board configuration before "
                              "flashing?")
             if response == gtk.RESPONSE_YES:
                 self.save_config()
@@ -389,7 +448,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         except Exception, why:
             logger.error("Problem flashing firmware. ""%s" % why)
         self.check_device_name_and_version()
-
 
     def load_config(self):
         '''
@@ -419,8 +477,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         filename = path(dialog.get_filename())
         dialog.destroy()
 
-        # TODO: Load control-board configuration from file rather than
-        # calibration data.
         if response == gtk.RESPONSE_OK:
             try:
                 config = yaml.load(filename.bytes())
@@ -464,14 +520,29 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         dialog.destroy()
 
         if response == gtk.RESPONSE_OK:
-            response = yesno('File exists. Would you like to overwrite it?')
-            if response == gtk.RESPONSE_YES:
-                config = self.control_board.read_config()
-                config_str = yaml.dump(dict([(k, v) for k, v in
-                                             config.iteritems() if v is not
-                                             None]))
-                with filename.open('wb') as output:
-                    print >> output, '''
+            if filename.isfile():
+                response = yesno('File exists. Would you like to overwrite it?')
+                if response != gtk.RESPONSE_YES:
+                    return
+            self.to_yaml(filename)
+
+    def to_yaml(self, output_path):
+        '''
+        Write control board configuration to a YAML output file.
+        '''
+        config = self.control_board.read_config()
+        config = dict([(k, v) for k, v in config.iteritems()
+                        if v is not None])
+        for k in config.keys():
+            # Yaml doesn't support serializing numpy scalar types, but the
+            # configuration returned by `read_config` may contain numpy
+            # floating point values.  Therefore, we check and cast each
+            # numpy float as a native Python float.
+            if isinstance(config[k], np.float32):
+                config[k] = float(config[k])
+        config_str = yaml.dump(config)
+        with open(output_path, 'wb') as output:
+            print >> output, '''
 # DropBot DMF control-board configuration
 # =======================================
 #'
@@ -481,8 +552,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 # [1]: http://microfluidics.utoronto.ca/trac/dropbot/ticket/41#ticket
 # [2]: http://microfluidics.utoronto.ca/trac/dropbot
 # [3]: http://microfluidics.utoronto.ca'''.strip()
-
-                    print >> output, config_str
+            print >> output, config_str
 
     def on_edit_configuration(self, widget=None, data=None):
         '''
@@ -674,16 +744,13 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     str(n_channels) + " channels"
             except:
                 pass
-        self.perform_calibration_menu_item.set_sensitive(connected)
-        self.save_configuration_to_file_menu_item.set_sensitive(connected)
-        self.load_configuration_from_file_menu_item.set_sensitive(connected)
-        self.edit_configuration_menu_item.set_sensitive(connected)
-        self.reset_configuration_to_default_values_menu_item.set_sensitive(
-            connected)
-        self.feedback_options_controller.measure_cap_filler_menu_item\
-            .set_sensitive(connected)
-        self.feedback_options_controller.measure_cap_liquid_menu_item\
-            .set_sensitive(connected)
+
+        # Enable/disable control board menu items based on the connection
+        # status of the control board.
+        apply_dict_depth_first(self.menu_items,
+                               lambda key, node, parents:
+                               node.item[0].set_sensitive(connected))
+
         app.main_window_controller.label_control_board_status\
            .set_text(self.connection_status)
 
@@ -802,7 +869,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             self.measure_impedance_non_blocking(
                                 app_values['sampling_window_ms'],
                                 int(math.ceil(options.duration / (
-                                              app_values['sampling_window_ms'] + 
+                                              app_values['sampling_window_ms'] +
                                               app_values['delay_between_windows_ms']))),
                                 app_values['delay_between_windows_ms'],
                                 app_values['interleave_feedback_samples'],
@@ -929,12 +996,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         logger.debug("V_actuation=%s" % results.V_actuation())
         logger.debug("Z_device=%s" % results.Z_device())
         app.experiment_log.add_data({"FeedbackResults": results}, self.name)
-        
-        normalized_capacitance = np.ma.masked_invalid(results.capacitance() / 
+
+        normalized_capacitance = np.ma.masked_invalid(results.capacitance() /
             area)
-        
+
         if (self.control_board.calibration._C_drop and
-                np.max(normalized_capacitance) < 
+                np.max(normalized_capacitance) <
                 options.feedback_options.action.percent_threshold / 100.0 *
                 self.control_board.calibration.C_drop(options.frequency)):
             logger.info('step=%d: attempt=%d, max(C)/A=%.1e F/mm^2. Repeat' %
@@ -1177,7 +1244,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                              interleave_samples,
                                              rms,
                                              state)
-        
+
     def measure_impedance(self,
                           sampling_window_ms,
                           n_sampling_windows,
@@ -1200,7 +1267,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                              interleave_samples,
                                              rms,
                                              state)
-        
+
     def get_default_step_options(self):
         return DMFControlBoardOptions()
 
