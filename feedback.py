@@ -53,40 +53,10 @@ from microdrop.app_context import get_app
 from microdrop.plugin_helpers import get_plugin_info
 from dmf_control_board import (FeedbackCalibration, FeedbackResults,
                                FeedbackResultsSeries)
-from dmf_control_board.gui.reference import (AssistantView as
-                                             ReferenceAssistantView)
-from dmf_control_board.gui.impedance import (AssistantView as
-                                             ImpedanceAssistantView)
 from dmf_control_board.calibrate.hv_attenuator import plot_feedback_params
 from dmf_control_board.calibrate.impedance_benchmarks import plot_stat_summary
-
-
-class MicrodropReferenceAssistantView(ReferenceAssistantView):
-    def create_ui(self):
-        super(MicrodropReferenceAssistantView, self).create_ui()
-        self.widget.set_modal(True)
-
-    def close_button_clicked(self, assistant):
-        self.widget.set_modal(False)
-        assistant.hide()
-
-    def cancel_button_clicked(self, assistant):
-        self.widget.set_modal(False)
-        assistant.hide()
-
-
-class MicrodropImpedanceAssistantView(ImpedanceAssistantView):
-    def create_ui(self):
-        super(MicrodropImpedanceAssistantView, self).create_ui()
-        self.widget.set_modal(True)
-
-    def close_button_clicked(self, assistant):
-        self.widget.set_modal(False)
-        assistant.hide()
-
-    def cancel_button_clicked(self, assistant):
-        self.widget.set_modal(False)
-        assistant.hide()
+from .wizards import (MicrodropImpedanceAssistantView,
+                      MicrodropReferenceAssistantView)
 
 
 class AmplifierGainNotCalibrated(Exception):
@@ -1608,6 +1578,7 @@ class FeedbackCalibrationController():
                      gtk.RESPONSE_OK)
         )
         dialog.set_default_response(gtk.RESPONSE_OK)
+        dialog.set_current_folder(self.plugin.calibrations_dir())
         response = dialog.run()
         filename = dialog.get_filename()
         dialog.destroy()
@@ -1654,6 +1625,7 @@ class FeedbackCalibrationController():
                      gtk.RESPONSE_OK)
         )
         dialog.set_default_response(gtk.RESPONSE_OK)
+        dialog.set_current_folder(self.plugin.calibrations_dir())
         response = dialog.run()
         filename = dialog.get_filename()
         dialog.destroy()

@@ -52,6 +52,7 @@ from feedback import (FeedbackOptions, FeedbackOptionsController,
                       SweepFrequencyAction, SweepVoltageAction)
 from serial_device import SerialDevice, get_serial_ports
 from nested_structures import apply_depth_first, apply_dict_depth_first
+from .wizards import MicrodropChannelsAssistantView
 
 
 PluginGlobals.push_env('microdrop.managed')
@@ -181,7 +182,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.timeout_id = None
         self.watchdog_timeout_id = None
 
-        self.menu_actions = [('Calibration',
+        self.menu_actions = ['Test channels...',
+                             ('Calibration',
                               ['Calibrate reference load',
                                'Open reference load calibration',
                                'Calibrate device load',
@@ -260,8 +262,24 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             # Attach each menu item to the corresponding parent menu.
             apply_dict_depth_first(self.menu_items, attach_menu_item)
 
+            def test_channels(*args):
+                '''
+                Launch wizard to test actuation of a bank of switches *(i.e.,
+                all switches on a single switching board)*.
+
+                Append results to an [HDF][1] file, where measurements from the
+                same run share a common value in the `timestamp` column.
+                '''
+                view = MicrodropChannelsAssistantView(self.control_board)
+                def on_close(*args):
+                    view.to_hdf(self.calibrations_dir().joinpath('channels.h5'))
+                view.widget.connect('close', on_close)
+                view.show()
+
             # Connect the action for each menu item to the corresponding
             # call-back function.
+            self.menu_items['Test channels...'].item[0].connect('activate',
+                                                                test_channels)
             menu = self.menu_items['Configuration']
             menu['Edit settings'][0].connect('activate',
                                              self.on_edit_configuration)
