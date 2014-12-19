@@ -696,41 +696,43 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         options = self.get_step_options()
         feedback_options = options.feedback_options
 
-        if results.V_actuation()[-1] < 5.0:
-            logger.error("Low voltage detected. Please check that the "
-                         "amplifier is on.")
-        else:
-            voltage = results.voltage
-            logger.info('[DMFControlBoardPlugin]'
-                        '.on_device_impedance_update():')
-            logger.info('\tset_voltage=%.1f, measured_voltage=%.1f, '
-                        'error=%.1f%%' % (voltage, results.V_actuation()[-1],
-                                          100 * (results.V_actuation()[-1] -
-                                                 voltage) / voltage))
+        voltage = results.voltage
+        logger.info('[DMFControlBoardPlugin]'
+                    '.on_device_impedance_update():')
+        logger.info('\tset_voltage=%.1f, measured_voltage=%.1f, '
+                    'error=%.1f%%' % (voltage, results.V_actuation()[-1],
+                                      100 * (results.V_actuation()[-1] -
+                                             voltage) / voltage))
 
-            # check that the signal is within tolerance
-            if (abs(results.V_actuation()[-1] - voltage) >
-                    self.control_board.voltage_tolerance):
+        # check that the signal is within tolerance
+        if (abs(results.V_actuation()[-1] - voltage) >
+                self.control_board.voltage_tolerance):
 
-                # allow maximum of 5 adjustment attempts
-                if (self.control_board.auto_adjust_amplifier_gain and
-                        self.n_voltage_adjustments is not None and
-                        self.n_voltage_adjustments < 5):
-                    logger.info('\tn_voltage_adjustments=%d' %
-                                self.n_voltage_adjustments)
-                    emit_signal("set_voltage", voltage,
-                                interface=IWaveformGenerator)
-                    self.check_impedance(options, self.n_voltage_adjustments +
-                                         1)
-                else:
-                    self.n_voltage_adjustments = None
-                    logger.error("Unable to achieve the specified voltage.")
+            # if the signal is less than the voltage tolerance
+            if results.V_actuation()[-1] < self.control_board.voltage_tolerance:
+                logger.error("Low voltage detected. Please check that the "
+                             "amplifier is on.")
+                return
 
-            if (self.control_board.auto_adjust_amplifier_gain and not
-                    self.amplifier_gain_initialized):
-                self.amplifier_gain_initialized = True
-                logger.info('Amplifier gain initialized (gain=%.1f)' %
-                            self.control_board.amplifier_gain)
+            # allow maximum of 5 adjustment attempts
+            if (self.control_board.auto_adjust_amplifier_gain and
+                    self.n_voltage_adjustments is not None and
+                    self.n_voltage_adjustments < 5):
+                logger.info('\tn_voltage_adjustments=%d' %
+                            self.n_voltage_adjustments)
+                emit_signal("set_voltage", voltage,
+                            interface=IWaveformGenerator)
+                self.check_impedance(options, self.n_voltage_adjustments +
+                                     1)
+            else:
+                self.n_voltage_adjustments = None
+                logger.error("Unable to achieve the specified voltage.")
+
+        if (self.control_board.auto_adjust_amplifier_gain and not
+                self.amplifier_gain_initialized):
+            self.amplifier_gain_initialized = True
+            logger.info('Amplifier gain initialized (gain=%.1f)' %
+                        self.control_board.amplifier_gain)
 
     def get_actuated_area(self):
         app = get_app()
@@ -898,10 +900,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
     def get_impedance_data(self):
         """
-        This function wraps the control_board.get_impedance_data() function
-        and sends an on_device_impedance_update.
+        This function wraps the control_board.get_impedance_data() function and
+        adds the actuated area.
         """
-        app_values = self.get_app_values()
         results = self.control_board.get_impedance_data()
         results.area = self.get_actuated_area()
         return results
