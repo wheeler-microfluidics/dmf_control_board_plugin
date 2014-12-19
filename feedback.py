@@ -295,25 +295,22 @@ class FeedbackOptionsController():
     def on_measure_cap_liquid(self, widget, data=None):
         self.plugin.control_board.calibration._C_drop = \
             self.measure_device_capacitance()
-
+            
     def measure_device_capacitance(self):
         app = get_app()
-        electrode = \
-            app.dmf_device_controller.view.popup.last_electrode_clicked
-        area = electrode.area() * app.dmf_device.scale
-        current_state = self.plugin.control_board.state_of_all_channels
-        state = np.zeros(len(current_state))
+        area = self.plugin.get_actuated_area()
 
-        if (self.plugin.control_board.number_of_channels() <
-                max(electrode.channels)):
-            logging.warning("Error: currently connected board does not have "
-                            "enough channels to perform calibration on this "
-                            "electrode.")
+        if area == 0:
+            logging.error("At least one electrode must be actuated to perform "
+                          "calibration.")
             return
 
-        state[electrode.channels] = 1
         step = app.protocol.current_step()
         dmf_options = step.get_data(self.plugin.name)
+
+        # get the current state of channels
+        state = app.dmf_device_controller.get_step_options().state_of_channels
+
         voltage = dmf_options.voltage
         emit_signal("set_voltage", voltage, interface=IWaveformGenerator)
         app_values = self.plugin.get_app_values()
@@ -345,16 +342,23 @@ class FeedbackOptionsController():
             capacitance = np.mean(results.capacitance())
             logging.info('\tcapacitance = %e F (%e F/mm^2)' % \
                      (capacitance, capacitance / area))
-
+            
         capacitance = np.mean(results.capacitance())
         logging.info('mean(capacitance) = %e F (%e F/mm^2)' % \
                      (capacitance, capacitance / area))
         
-        # set the channels and frequency back to their original state
-        self.plugin.control_board.state_of_all_channels = current_state
+        # set the frequency back to it's original state
         emit_signal("set_frequency",
                     dmf_options.frequency,
                     interface=IWaveformGenerator)
+        self.plugin.check_impedance(dmf_options)
+        
+        # turn off all electrodes if we're not in realtime mode
+        if not app.realtime_mode:
+            self.plugin.control_board.set_state_of_all_channels(
+                np.zeros(self.plugin.control_board.number_of_channels())
+            )
+            
         return dict(frequency=results.frequency.tolist(),
                     capacitance=(np.mean(results.capacitance(), 1) / area). \
                         tolist())
