@@ -3,8 +3,8 @@ import yaml
 
 from microdrop_utility import Version
 
-package_name = 'dmf_control_board_plugin'
-plugin_name = 'wheelerlab.dmf_control_board_plugin'
+package_name = 'dmf_control_board'
+plugin_name = 'wheelerlab.dmf_control_board'
 
 # create a version sting based on the git revision/branch
 version = str(Version.from_git_repository())
@@ -18,5 +18,5 @@ with open('properties.yml', 'w') as f:
 # create the tar.gz plugin archive
 with tarfile.open("%s-%s.tar.gz" % (package_name, version), "w:gz") as tar:
     for name in ['__init__.py', 'feedback.py', 'glade', 'properties.yml',
-                 'hooks', 'on_plugin_install.py', 'requirements.txt']:
+                 'hooks', 'on_plugin_install.py', 'requirements.txt', 'wizards.py']:
         tar.add(name)
