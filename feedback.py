@@ -51,10 +51,12 @@ from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 from microdrop.plugin_helpers import get_plugin_info
-from dmf_control_board import (FeedbackCalibration, FeedbackResults,
-                               FeedbackResultsSeries)
-from dmf_control_board.calibrate.hv_attenuator import plot_feedback_params
-from dmf_control_board.calibrate.impedance_benchmarks import plot_stat_summary
+from dmf_control_board_firmware import (FeedbackCalibration, FeedbackResults,
+                                        FeedbackResultsSeries)
+from dmf_control_board_firmware.calibrate.hv_attenuator import (
+  plot_feedback_params)
+from dmf_control_board_firmware.calibrate.impedance_benchmarks import (
+  plot_stat_summary)
 from .wizards import (MicrodropImpedanceAssistantView,
                       MicrodropReferenceAssistantView)
 

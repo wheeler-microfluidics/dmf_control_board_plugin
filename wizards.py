@@ -1,8 +1,8 @@
-from dmf_control_board.gui.reference import (AssistantView as
+from dmf_control_board_firmware.gui.reference import (AssistantView as
                                              ReferenceAssistantView)
-from dmf_control_board.gui.impedance import (AssistantView as
+from dmf_control_board_firmware.gui.impedance import (AssistantView as
                                              ImpedanceAssistantView)
-from dmf_control_board.gui.channels import (AssistantView as
+from dmf_control_board_firmware.gui.channels import (AssistantView as
                                             ChannelsAssistantView)
 
 

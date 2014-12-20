@@ -44,8 +44,7 @@ from microdrop.plugin_manager import (IPlugin, IWaveformGenerator, Plugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 from microdrop.dmf_device import DeviceScaleNotSet
-
-from dmf_control_board import DMFControlBoard, FeedbackResultsSeries
+from dmf_control_board_firmware import DMFControlBoard, FeedbackResultsSeries
 from feedback import (FeedbackOptions, FeedbackOptionsController,
                       FeedbackCalibrationController,
                       FeedbackResultsController, RetryAction,
@@ -1368,6 +1367,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             directory = home_dir().joinpath('Microdrop', 'calibrations')
         else:
             directory = home_dir().joinpath('.microdrop', 'calibrations')
+        if not directory.isdir():
+            directory.makedirs_p()
         return directory
 
 PluginGlobals.pop_env()
