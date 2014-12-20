@@ -359,7 +359,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.amplifier_gain_initialized = False
         if len(DMFControlBoardPlugin.serial_ports_):
             app_values = self.get_app_values()
-            print app_values
             # try to connect to the last successful port
             try:
                 self.control_board.connect(str(app_values['serial_port']),
@@ -377,13 +376,17 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app_values = self.get_app_values()
 
         if app_values.get('auto_atx_power_off', True):
-            # Enable watchdog-timer to shut off power supply when the
-            # `MicroDrop` app is closed.
-            self.control_board.watchdog_state = True
-            self.control_board.watchdog_enabled = True
-            self.watchdog_timeout_id = gobject.timeout_add(
-                2000,  # Trigger every 2 seconds.
-                self._callback_reset_watchdog)
+            try:
+                # Try to enable watchdog-timer to shut off power supply when
+                # the `MicroDrop` app is closed.
+                self.control_board.watchdog_state = True
+                self.control_board.watchdog_enabled = True
+                self.watchdog_timeout_id = gobject.timeout_add(
+                    2000,  # Trigger every 2 seconds.
+                    self._callback_reset_watchdog)
+            except: # earlier versions of the firmware may not accept this
+                    # command, so we need to catch any exceptions
+                pass
 
     def _callback_reset_watchdog(self):
         if self.control_board.connected():
