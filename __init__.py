@@ -230,7 +230,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             self.feedback_options_controller.on_plugin_enable()
 
-            def prepare_menu_item(node, parents, children):
+            def prepare_menu_item(node, parents, children, *args):
                 menu_item = gtk.MenuItem(node)
                 menu_item.show()
 
@@ -245,7 +245,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 else:
                     return (menu_item, None)
 
-            def attach_menu_item(key, node, parents):
+            def attach_menu_item(key, node, parents, *args):
                 if parents:
                     # Extract menu item of nearest parent.
                     parent_item = parents[-1][1].item[1]
@@ -256,7 +256,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 node.item[0].show()
 
             # Prepare menu items for layout defined in `self.menu_actions`.
-            self.menu_items = apply_depth_first(self.menu_actions, as_dict=True,
+            self.menu_items = apply_depth_first(self.menu_actions,
+                                                as_dict=True,
                                                 func=prepare_menu_item)
             # Attach each menu item to the corresponding parent menu.
             apply_dict_depth_first(self.menu_items, attach_menu_item)
@@ -750,7 +751,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         # Enable/disable control board menu items based on the connection
         # status of the control board.
         apply_dict_depth_first(self.menu_items,
-                               lambda key, node, parents:
+                               lambda key, node, parents, *args:
                                node.item[0].set_sensitive(connected))
 
         app.main_window_controller.label_control_board_status\
