@@ -1367,10 +1367,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         return []
 
     def calibrations_dir(self):
-        if os.name == 'nt':
-            directory = home_dir().joinpath('Microdrop', 'calibrations')
-        else:
-            directory = home_dir().joinpath('.microdrop', 'calibrations')
+        directory = path(get_app().config['data_dir']) / path('calibrations')
+        logger.debug('calibrations_dir=%s' % directory)
         if not directory.isdir():
             directory.makedirs_p()
         return directory
