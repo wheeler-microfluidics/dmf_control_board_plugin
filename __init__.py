@@ -1346,7 +1346,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.on_step_options_changed(self.name,
                                      get_app().protocol.current_step_number)
 
-    def on_experiment_log_created(self, log):
+    def on_experiment_log_changed(self, log):
+        # Check if the experiment log already has control board meta data, and
+        # if so, return.
+        data = log.get("control board name")
+        for val in data:
+            if val:
+                return
+
+        # otherwise, add the name, hardware version and firmware version
         data = {}
         if self.control_board.connected():
             data["control board name"] = self.control_board.name()
