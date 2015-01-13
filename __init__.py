@@ -139,7 +139,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Integer.named('baud_rate')
         .using(default=115200, optional=True, validators=[ValueAtLeast(minimum=0),
                                                      ],),
-        Boolean.named('auto_atx_power_off').using(default=True, optional=True),
+        Boolean.named('auto_atx_power_off').using(default=False, optional=True),
     )
 
     StepFields = Form.of(
@@ -345,6 +345,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     app_values['serial_port']):
                 reconnect = True
 
+            # If we're not reconnecting, we need to update the watchdog timer 
+            if self.control_board.connected() and not reconnect:
+                self._update_watchdog(app_values['auto_atx_power_off'])
+                
             if reconnect:
                 self.connect()
 
@@ -373,25 +377,40 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             self.set_app_values(app_values)
         else:
             raise Exception("No serial ports available.")
+        self._update_watchdog(app_values['auto_atx_power_off'])
 
-        app_values = self.get_app_values()
-
-        if app_values.get('auto_atx_power_off', True):
+    def _update_watchdog(self, enabled):
+        if enabled:
             try:
                 # Try to enable watchdog-timer to shut off power supply when
                 # the `MicroDrop` app is closed.
                 self.control_board.watchdog_state = True
                 self.control_board.watchdog_enabled = True
-                self.watchdog_timeout_id = gobject.timeout_add(
-                    2000,  # Trigger every 2 seconds.
-                    self._callback_reset_watchdog)
+                if self.watchdog_timeout_id is None:
+                    self.watchdog_timeout_id = gobject.timeout_add(
+                        2000,  # Trigger every 2 seconds.
+                        self._callback_reset_watchdog)
+            except: # earlier versions of the firmware may not accept this
+                    # command, so we need to catch any exceptions
+                pass
+        else:
+            try:
+                # Try to disable the watchdog-timer
+                self.control_board.watchdog_enabled = False
+                # Kill any running timer
+                if self.watchdog_timeout_id:
+                    gobject.source_remove(self.watchdog_timeout_id)
+                    self.watchdog_timeout_id = None
             except: # earlier versions of the firmware may not accept this
                     # command, so we need to catch any exceptions
                 pass
 
     def _callback_reset_watchdog(self):
-        if self.control_board.connected():
-            self.control_board.watchdog_state = True
+        # only reset the watchdog if we are connected and not waiting for a
+        # reply 
+        if self.control_board.connected() and \
+        not self.control_board.waiting_for_reply():
+                self.control_board.watchdog_state = True
         # [Return `True`][1] to request to be called again.
         #
         # [1]: http://www.pygtk.org/pygtk2reference/gobject-functions.html#function-gobject--timeout-add
