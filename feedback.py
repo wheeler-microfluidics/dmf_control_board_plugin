@@ -1060,7 +1060,10 @@ class FeedbackResultsController():
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        normalization = area
+                        if area == 0:
+                            continue
+                        else:
+                            normalization = area
 
                     self.export_data.append('step:, %d' % (row['core']["step"]
                                                            + 1))
@@ -1185,7 +1188,10 @@ class FeedbackResultsController():
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        normalization = area
+                        if area == 0:
+                            continue
+                        else:
+                            normalization = area
 
                     self.export_data.append('step:, %d' %
                                             (row['core']["step"] + 1))
@@ -1263,7 +1269,10 @@ class FeedbackResultsController():
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        normalization = area
+                        if area == 0:
+                            continue
+                        else:
+                            normalization = area
 
                     self.export_data.append('step:, %d' %
                                             (row['core']["step"] + 1))
