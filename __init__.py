@@ -60,7 +60,7 @@ PluginGlobals.push_env('microdrop.managed')
 
 
 class DMFControlBoardOptions(object):
-    def __init__(self, duration=100, voltage=100, frequency=1e3,
+    def __init__(self, duration=100, voltage=100, frequency=10e3,
                  feedback_options=None):
         self.duration = duration
         if feedback_options is None:
