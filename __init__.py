@@ -45,7 +45,8 @@ from microdrop.plugin_manager import (IPlugin, IWaveformGenerator, Plugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 from microdrop.dmf_device import DeviceScaleNotSet
-from dmf_control_board_firmware import DMFControlBoard, FeedbackResultsSeries
+from dmf_control_board_firmware import (DMFControlBoard, FeedbackResultsSeries,
+                                        BadVGND)
 from feedback import (FeedbackOptions, FeedbackOptionsController,
                       FeedbackCalibrationController,
                       FeedbackResultsController, RetryAction,
@@ -369,7 +370,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             try:
                 self.control_board.connect(str(app_values['serial_port']),
                     app_values['baud_rate'])
-            except Exception, why:
+            except BadVGND, why:
+                logger.warning(why)
+            except RuntimeError, why:
                 logger.warning('Could not connect to control board on port %s.'
                                ' Checking other ports... [%s]' %
                                (app_values['serial_port'], why))
