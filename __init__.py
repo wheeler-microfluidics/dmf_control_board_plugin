@@ -518,8 +518,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                            'settings to control-board.')
                 logging.info(message)
                 info_dialog(message)
-                # reconnect to apply settings
-                self.connect()
                 
     def save_config(self):
         '''
@@ -750,15 +748,11 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             self.control_board.set_series_capacitance(
                                 channel, v / 1e12,
                                 resistor_index=series_resistor)
-            # reconnect to update settings
-            self.connect()
             if get_app().protocol:
                 self.on_step_run()
 
     def on_reset_configuration_to_default_values(self, widget=None, data=None):
         self.control_board.reset_config_to_defaults()
-        # reconnect to update settings
-        self.connect()
 
     def update_connection_status(self):
         self.connection_status = "Not connected"
