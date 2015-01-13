@@ -126,7 +126,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         default_port_ = None
 
     AppFields = Form.of(
-        Integer.named('sampling_window_ms').using(default=10, optional=True,
+        Integer.named('sampling_window_ms').using(default=5, optional=True,
                                                 validators=
                                                 [ValueAtLeast(minimum=0), ],),
         Integer.named('delay_between_windows_ms')
@@ -150,7 +150,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Float.named('voltage').using(default=100, optional=True,
                                      validators=[ValueAtLeast(minimum=0),
                                                  max_voltage]),
-        Float.named('frequency').using(default=1e3, optional=True,
+        Float.named('frequency').using(default=10e3, optional=True,
                                        validators=[ValueAtLeast(minimum=0),
                                                    check_frequency]),
         Boolean.named('feedback_enabled').using(default=True, optional=True),
