@@ -1662,46 +1662,40 @@ class FeedbackCalibrationController():
             return
 
     def calibrate_attenuators(self):
-        output_dir = self.plugin.calibrations_dir()
-        if not output_dir.isdir():
-            output_dir.makedirs_p()
-
+        calibrations_dir = self.plugin.calibrations_dir()
+        configurations_dir = self.plugin.calibrations_dir()
+        prefix = self.plugin._file_prefix()
         view = MicrodropReferenceAssistantView(self.plugin.control_board)
 
         def on_calibrated(assistant):
-            timestamp = datetime.now().strftime('%Y-%m-%dT%Hh%Mm%S')
-            prefix = '[%05d]-%s-' % (self.plugin.control_board.serial_number,
-                                     timestamp)
-            self.plugin.to_yaml(output_dir.joinpath(prefix + 'config.yml'))
-
-            output_path = output_dir.joinpath(prefix + 'calibration.h5')
-            view.to_hdf(output_path)
-            self.calibrate_impedance(output_path)
+            self.plugin.to_yaml(configurations_dir.joinpath(prefix +
+                                                            'config.yml')
+            )
+            view.to_hdf(
+                calibrations_dir.joinpath(prefix + 
+                                          'calibration-reference-load.h5')
+            )
 
         # Save the persistent configuration settings from the control-board to
         # a file upon successful calibration.
         view.widget.connect('close', on_calibrated)
         view.show()
 
-    def calibrate_impedance(self, output_path=None):
-        output_dir = self.plugin.calibrations_dir()
-        if not output_dir.isdir():
-            output_dir.makedirs_p()
-
+    def calibrate_impedance(self):
+        calibrations_dir = self.plugin.calibrations_dir()
+        configurations_dir = self.plugin.calibrations_dir()
+        prefix = self.plugin._file_prefix()
         view = MicrodropImpedanceAssistantView(self.plugin.control_board)
 
-        def on_calibrated(output_path, assistant):
-            timestamp = datetime.now().strftime('%Y-%m-%dT%Hh%Mm%S')
-            prefix = '[%05d]-%s-' % (self.plugin.control_board.serial_number,
-                                     timestamp)
-            self.plugin.to_yaml(output_dir.joinpath(prefix + 'config.yml'))
-            if output_path is None:
-                output_path = output_dir.joinpath(prefix +
-                                                  'calibration-load.h5')
-            view.to_hdf(output_path)
+        def on_calibrated(assistant):
+            self.plugin.to_yaml(configurations_dir.joinpath(prefix +
+                                                            'config.yml')
+            )
+            view.to_hdf(calibrations_dir.joinpath(prefix +
+                                                  'calibration-device-load.h5')
+            )
 
         # Save the persistent configuration settings from the control-board to
         # a file upon successful calibration.
-        view.widget.connect('close', lambda *args: on_calibrated(output_path,
-                                                                 *args))
+        view.widget.connect('close', on_calibrated)
         view.show()

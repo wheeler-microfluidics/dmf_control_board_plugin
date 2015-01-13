@@ -22,6 +22,7 @@ import math
 import re
 from copy import deepcopy
 
+from datetime import datetime
 from pygtkhelpers.ui.dialogs import info as info_dialog
 import yaml
 import gtk
@@ -495,6 +496,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                      gtk.RESPONSE_OK)
         )
         dialog.set_default_response(gtk.RESPONSE_OK)
+        dialog.set_current_folder(self.configurations_dir())
         response = dialog.run()
         filename = path(dialog.get_filename())
         dialog.destroy()
@@ -513,7 +515,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                            'settings to control-board.')
                 logging.info(message)
                 info_dialog(message)
-
+                # reconnect to apply settings
+                self.connect()
+                
     def save_config(self):
         '''
         ## `save_config` ##
@@ -537,6 +541,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                      gtk.RESPONSE_OK)
         )
         dialog.set_default_response(gtk.RESPONSE_OK)
+        dialog.set_current_folder(self.configurations_dir())
+        dialog.set_current_name(self._file_prefix() + 'config.yml')
         response = dialog.run()
         filename = path(dialog.get_filename())
         dialog.destroy()
@@ -1393,11 +1399,23 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                     'microdrop.gui.protocol_grid_controller')]
         return []
 
-    def calibrations_dir(self):
-        directory = path(get_app().config['data_dir']) / path('calibrations')
+    def configurations_dir(self):
+        directory = path(get_app().config['data_dir']). \
+            joinpath('configurations')
         logger.debug('calibrations_dir=%s' % directory)
         if not directory.isdir():
             directory.makedirs_p()
         return directory
+
+    def calibrations_dir(self):
+        directory = path(get_app().config['data_dir']).joinpath('calibrations')
+        logger.debug('calibrations_dir=%s' % directory)
+        if not directory.isdir():
+            directory.makedirs_p()
+        return directory
+
+    def _file_prefix(self):
+        timestamp = datetime.now().strftime('%Y-%m-%dT%Hh%Mm%S')
+        return '[%05d]-%s-' % (self.control_board.serial_number, timestamp)
 
 PluginGlobals.pop_env()
