@@ -1672,7 +1672,7 @@ class FeedbackCalibrationController():
 
     def calibrate_attenuators(self):
         calibrations_dir = self.plugin.calibrations_dir()
-        configurations_dir = self.plugin.calibrations_dir()
+        configurations_dir = self.plugin.configurations_dir()
         prefix = self.plugin._file_prefix()
         view = MicrodropReferenceAssistantView(self.plugin.control_board)
 
@@ -1692,7 +1692,7 @@ class FeedbackCalibrationController():
 
     def calibrate_impedance(self):
         calibrations_dir = self.plugin.calibrations_dir()
-        configurations_dir = self.plugin.calibrations_dir()
+        configurations_dir = self.plugin.configurations_dir()
         prefix = self.plugin._file_prefix()
         view = MicrodropImpedanceAssistantView(self.plugin.control_board)
 
