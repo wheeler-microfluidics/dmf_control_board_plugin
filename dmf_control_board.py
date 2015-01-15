@@ -23,7 +23,7 @@ import math
 import re
 import copy
 
-from path import path
+from path_helpers import path
 import numpy as np
 
 from .__init__ import package_path

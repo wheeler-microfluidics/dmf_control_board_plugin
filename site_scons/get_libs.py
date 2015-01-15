@@ -3,7 +3,7 @@ import sys
 
 from SCons.Script import File
 
-from path import path
+from path_helpers import path
 
 
 def get_lib_paths():

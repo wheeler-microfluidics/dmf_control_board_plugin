@@ -1,7 +1,7 @@
 import sys
 import os
 from itertools import chain
-from path import path
+from path_helpers import path
 
 home_dir = path('~').expand()
 

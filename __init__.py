@@ -1,7 +1,7 @@
 import sys
 import logging
 
-from path import path
+from path_helpers import path
 
 try:
     from app_context import get_app

@@ -33,7 +33,7 @@ import matplotlib.mlab as mlab
 if os.name=='nt':
     matplotlib.rc('font', **{'family':'sans-serif','sans-serif':['Arial']})
 from matplotlib.figure import Figure
-from path import path
+from path_helpers import path
 import scipy.optimize as optimize
 import yaml
 
