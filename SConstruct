@@ -3,6 +3,7 @@ import os
 import warnings
 import sys
 
+import distutils
 import yaml
 from path import path
 
@@ -32,7 +33,7 @@ SOFTWARE_VERSION = get_version_string()
 Export('SOFTWARE_VERSION')
 
 HARDWARE_MAJOR_VERSION_DEFAULT = 2
-HARDWARE_MAJOR_VERSION = ARGUMENTS.get('HARDWARE_MAJOR_VERSION', HARDWARE_MAJOR_VERSION_DEFAULT) 
+HARDWARE_MAJOR_VERSION = ARGUMENTS.get('HARDWARE_MAJOR_VERSION', HARDWARE_MAJOR_VERSION_DEFAULT)
 Export('HARDWARE_MAJOR_VERSION')
 
 HARDWARE_MINOR_VERSION_DEFAULT = 0
@@ -54,7 +55,7 @@ if os.name == 'nt':
 
     # Initialize ENV with OS environment.  Without this, PATH is not set
     # correctly, leading to doxygen not being found in Windows.
-    env = Environment(tools=['mingw'], ENV=os.environ) 
+    env = Environment(tools=['mingw'], ENV=os.environ)
     env['LIBPREFIX'] = ''
     lib_path = [PYTHON_LIB_PATH, BOOST_LIB_PATH]
 
@@ -96,12 +97,9 @@ if os.name == 'nt':
     VariantDir('build/arduino', 'src', duplicate=0)
     SConscript('build/arduino/SConscript.arduino')
 else:
-    env.Append(LIBS=[get_lib(lib) for lib in ['libboost_python.so',
-                    'libboost_thread-mt.so',
-                    'libboost_filesystem-mt.so',
-                    'libboost_system-mt.so']] \
-                    + [PYTHON_LIB])
-    env.Append(CPPPATH=['/usr/include/%s' % PYTHON_LIB])
+    env.Append(LIBS=['boost_python', 'boost_thread', 'boost_filesystem',
+                     'boost_system', PYTHON_LIB])
+    env.Append(CPPPATH=[distutils.sysconfig.get_python_inc()])
 
     # Build host binaries
 
