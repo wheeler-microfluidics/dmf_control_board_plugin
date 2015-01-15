@@ -5,7 +5,7 @@ import sys
 
 import distutils
 import yaml
-from path import path
+from path_helpers import path
 
 import auto_config
 from get_libs import get_lib
