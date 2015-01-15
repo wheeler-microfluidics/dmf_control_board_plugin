@@ -23,7 +23,7 @@ import re
 import warnings
 from subprocess import Popen, PIPE, CalledProcessError
 
-from path import path
+from path_helpers import path
 
 from ..serial_device import SerialDevice, ConnectionError
 from ..__init__ import package_path

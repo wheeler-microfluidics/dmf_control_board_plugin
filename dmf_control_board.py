@@ -25,7 +25,7 @@ import copy
 import logging
 from struct import pack, unpack
 
-from path import path
+from path_helpers import path
 import numpy as np
 
 from .__init__ import package_path
