@@ -20,12 +20,12 @@ along with dmf_control_board.  If not, see <http://www.gnu.org/licenses/>.
 #include "RemoteObject.h"
 
 #ifdef AVR
-#include <util/crc16.h>
-#include "WProgram.h"
-#include <Wire.h>
-#include <SPI.h>
-#include <OneWire.h>
-#include <EEPROM.h>
+  #include <util/crc16.h>
+  #include "Arduino.h"
+  #include <Wire.h>
+  #include <SPI.h>
+  #include <OneWire.h>
+  #include <EEPROM.h>
 extern "C" void __cxa_pure_virtual(void); // These declarations are needed for
 void __cxa_pure_virtual(void) {}          // virtual functions on the Arduino.
 #else
@@ -541,14 +541,14 @@ uint8_t RemoteObject::ProcessCommand(uint8_t cmd) {
         uint8_t address = ReadUint8();
         Wire.beginTransmission(address);
         for(uint8_t i=0; i<payload_length()-2; i++) {
-          Wire.send(ReadUint8());
+          Wire.write(ReadUint8());
         }
         Wire.endTransmission();
         delay(1);
         uint8_t n_bytes_to_read = ReadUint8();
         Wire.requestFrom(address, n_bytes_to_read);
         while(Wire.available()) {
-          uint8_t data = Wire.receive();
+          uint8_t data = Wire.read();
           Serialize(&data, sizeof(uint8_t));
           n_bytes_read++;
         }
@@ -566,7 +566,7 @@ uint8_t RemoteObject::ProcessCommand(uint8_t cmd) {
         uint8_t address = ReadUint8();
         Wire.beginTransmission(address);
         for(uint8_t i=0; i<payload_length()-1; i++) {
-          Wire.send(ReadUint8());
+          Wire.write(ReadUint8());
         }
         Wire.endTransmission();
         return_code_ = RETURN_OK;
@@ -774,7 +774,7 @@ uint8_t RemoteObject::Connect(const char* port) {
   // wait up to 10 s for the Arduino to send something on the
   // serial port so that we know it's ready
   if(return_code==0) {
-    boost::posix_time::ptime t = 
+    boost::posix_time::ptime t =
       boost::posix_time::microsec_clock::universal_time();
     while(Serial.available()==false && \
       (boost::posix_time::microsec_clock::universal_time()-t)
@@ -1200,7 +1200,7 @@ uint8_t RemoteObject::spi_transfer(uint8_t value) {
     sprintf(log_message_string_, "sent: %d, received: %d",
       value, data);
     LogMessage(log_message_string_, function_name);
-    return data;  
+    return data;
   }
   return 0;
 }

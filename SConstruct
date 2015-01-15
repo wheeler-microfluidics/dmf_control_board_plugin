@@ -3,6 +3,7 @@ import os
 import warnings
 import sys
 
+import distutils
 import yaml
 from path import path
 
@@ -11,16 +12,14 @@ from get_libs import get_lib
 from git_util import GitUtil
 
 
-def get_plugin_version():
+def get_version_string():
     version = GitUtil(None).describe()
     m = re.search('^v(?P<major>\d+)\.(?P<minor>\d+)(-(?P<micro>\d+))?', version)
     if m.group('micro'):
         micro = m.group('micro')
     else:
         micro = '0'
-    version_string = "%s.%s.%s" % (m.group('major'),
-            m.group('minor'), micro)
-    return version_string
+    return "%s.%s.%s" % (m.group('major'), m.group('minor'), micro)
 
 
 PYTHON_VERSION = "%s.%s" % (sys.version_info[0],
@@ -30,8 +29,16 @@ env = Environment()
 
 print 'COMMAND_LINE_TARGETS:', COMMAND_LINE_TARGETS
 
-SOFTWARE_VERSION = get_plugin_version()
+SOFTWARE_VERSION = get_version_string()
 Export('SOFTWARE_VERSION')
+
+HARDWARE_MAJOR_VERSION_DEFAULT = 2
+HARDWARE_MAJOR_VERSION = ARGUMENTS.get('HARDWARE_MAJOR_VERSION', HARDWARE_MAJOR_VERSION_DEFAULT)
+Export('HARDWARE_MAJOR_VERSION')
+
+HARDWARE_MINOR_VERSION_DEFAULT = 0
+HARDWARE_MINOR_VERSION = ARGUMENTS.get('HARDWARE_MINOR_VERSION', HARDWARE_MINOR_VERSION_DEFAULT)
+Export('HARDWARE_MINOR_VERSION')
 
 Import('PYTHON_LIB')
 
@@ -48,7 +55,7 @@ if os.name == 'nt':
 
     # Initialize ENV with OS environment.  Without this, PATH is not set
     # correctly, leading to doxygen not being found in Windows.
-    env = Environment(tools=['mingw'], ENV=os.environ) 
+    env = Environment(tools=['mingw'], ENV=os.environ)
     env['LIBPREFIX'] = ''
     lib_path = [PYTHON_LIB_PATH, BOOST_LIB_PATH]
 
@@ -87,14 +94,12 @@ if os.name == 'nt':
         extra_files.append(lib.name)
 
     # Build Arduino binaries
-    SConscript('src/SConscript.arduino')
+    VariantDir('build/arduino', 'src', duplicate=0)
+    SConscript('build/arduino/SConscript.arduino')
 else:
-    env.Append(LIBS=[get_lib(lib) for lib in ['libboost_python.so',
-                    'libboost_thread-mt.so',
-                    'libboost_filesystem-mt.so',
-                    'libboost_system-mt.so']] \
-                    + [PYTHON_LIB])
-    env.Append(CPPPATH=['/usr/include/%s' % PYTHON_LIB])
+    env.Append(LIBS=['boost_python', 'boost_thread', 'boost_filesystem',
+                     'boost_system', PYTHON_LIB])
+    env.Append(CPPPATH=[distutils.sysconfig.get_python_inc()])
 
     # Build host binaries
 
@@ -106,8 +111,13 @@ else:
     SConscript('src/SConscript.arduino')
 
 Import('arduino_hex')
+Import('arduino_hexes')
 Import('pyext')
-package_hex = Install('.', arduino_hex)
+#package_hex = Install('.', arduino_hex)
+package_hexes = []
+for k, v in arduino_hexes.iteritems():
+    firmware_path = path('firmware').joinpath(k)
+    package_hexes.append(env.Install(firmware_path, v)[0])
 package_pyext = Install('.', pyext)
 
 # Build documentation
@@ -126,15 +136,16 @@ version_target = Command('version.txt', None,
                         'echo %s > $TARGET' % SOFTWARE_VERSION)
 plugin_root = path('.').abspath()
 properties_target = plugin_root.joinpath('properties.yml')
-properties = {'name': str(plugin_root.name), 'version': SOFTWARE_VERSION}
+properties = {'plugin_name': 'wheelerlab.dmf_control_board',
+        'package_name': str(plugin_root.name), 'version': SOFTWARE_VERSION}
 properties_target.write_bytes(yaml.dump(properties))
-archive_name = '%s-%s.tar.gz' % (properties['name'], SOFTWARE_VERSION)
+archive_name = '%s-%s.tar.gz' % (properties['package_name'], SOFTWARE_VERSION)
 
 # This will build an archive using what ever DISTTAR_FORMAT that is set.
-tar = tar_env.DistTar('%s' % properties['name'], [tar_env.Dir('#')])
+tar = tar_env.DistTar('%s' % properties['package_name'], [tar_env.Dir('#')])
 renamed_tar = tar_env.Command(tar_env.File(archive_name), None,
         Move(archive_name, tar[0]))
-Depends(tar, [package_hex, package_pyext, version_target] + extra_files)
+Depends(tar, package_hexes + [package_pyext, version_target] + extra_files)
 Depends(renamed_tar, tar)
 Clean(renamed_tar, tar)
 

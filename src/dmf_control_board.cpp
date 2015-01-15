@@ -23,11 +23,12 @@ along with dmf_control_board.  If not, see <http://www.gnu.org/licenses/>.
 using namespace std;
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #else
-#include "WProgram.h"
-#include <Wire.h>
-#include <SPI.h>
-#include <EEPROM.h>
-#include <math.h>
+  #include "Arduino.h"
+  #include <Wire.h>
+  #include <OneWire.h>
+  #include <SPI.h>
+  #include <EEPROM.h>
+  #include <math.h>
 #endif
 
 #ifdef AVR
@@ -95,11 +96,11 @@ uint8_t DmfControlBoard::ProcessCommand(uint8_t cmd) {
         for(uint8_t chip=0; chip<number_of_channels_/40; chip++) {
           for(uint8_t port=0; port<5; port++) {
             Wire.beginTransmission(PCA9505_ADDRESS_+chip);
-            Wire.send(PCA9505_OUTPUT_PORT_REGISTER_+port);
+            Wire.write(PCA9505_OUTPUT_PORT_REGISTER_+port);
             Wire.endTransmission();
             Wire.requestFrom(PCA9505_ADDRESS_+chip,1);
             if (Wire.available()) {
-              uint8_t data = Wire.receive();
+              uint8_t data = Wire.read();
               uint8_t state;
               for(uint8_t bit=0; bit<8; bit++) {
                 state = (data >> bit & 0x01)==0;
@@ -133,11 +134,11 @@ uint8_t DmfControlBoard::ProcessCommand(uint8_t cmd) {
           uint8_t port = (channel%40)/8;
           uint8_t bit = (channel%40)%8;
           Wire.beginTransmission(PCA9505_ADDRESS_+chip);
-          Wire.send(PCA9505_OUTPUT_PORT_REGISTER_+port);
+          Wire.write(PCA9505_OUTPUT_PORT_REGISTER_+port);
           Wire.endTransmission();
           Wire.requestFrom(PCA9505_ADDRESS_+chip, 1);
           if(Wire.available()) {
-            uint8_t data = Wire.receive();
+            uint8_t data = Wire.read();
             data = (data >> bit & 0x01)==0;
             Serialize(&data, sizeof(data));
             return_code_ = RETURN_OK;
@@ -227,8 +228,8 @@ uint8_t DmfControlBoard::ProcessCommand(uint8_t cmd) {
           // lsb =  DAC5 DAC4 DAC3 DAC2 DAC1 DAC0 CNF1 CNF0
           uint8_t lsb = (dac << 2) | cnf;
           Wire.beginTransmission(LTC6904_);
-          Wire.send(msb);
-          Wire.send(lsb);
+          Wire.write(msb);
+          Wire.write(lsb);
           Wire.endTransmission();     // stop transmitting
           return_code_ = RETURN_OK;
         }
@@ -441,7 +442,7 @@ uint8_t DmfControlBoard::ProcessCommand(uint8_t cmd) {
 
             uint8_t original_A0_index = A0_series_resistor_index_;
             uint8_t original_A1_index = A1_series_resistor_index_;
-            
+
             // set the resistors to their highest values
             SetSeriesResistor(0,
                sizeof(config_settings_.A0_series_resistance)/sizeof(float)-1);
@@ -531,7 +532,7 @@ uint8_t DmfControlBoard::ProcessCommand(uint8_t cmd) {
               }
             }
 
-            // set the resistors back to their original states            
+            // set the resistors back to their original states
             SetSeriesResistor(0, original_A0_index);
             SetSeriesResistor(1, original_A1_index);
           } else {
@@ -611,11 +612,11 @@ void DmfControlBoard::begin() {
   number_of_channels_ = 0;
   for(uint8_t chip=0; chip<8; chip++) {
     Wire.beginTransmission(PCA9505_ADDRESS_+chip);
-    Wire.send(PCA9505_CONFIG_IO_REGISTER_);
+    Wire.write(PCA9505_CONFIG_IO_REGISTER_);
     Wire.endTransmission();
     Wire.requestFrom(PCA9505_ADDRESS_+chip,1);
     if (Wire.available()) {
-      Wire.receive();
+      Wire.read();
       if(number_of_channels_==40*chip) {
         number_of_channels_ = 40*(chip+1);
       }
@@ -693,8 +694,8 @@ void DmfControlBoard::PeakExceeded() {
 // (code based on http://gdallaire.net/blog/?p=18)
 void DmfControlBoard::SendI2C(uint8_t row, uint8_t cmd, uint8_t data) {
   Wire.beginTransmission(row);
-  Wire.send(cmd);
-  Wire.send(data);
+  Wire.write(cmd);
+  Wire.write(data);
   Wire.endTransmission();
 }
 
@@ -851,11 +852,11 @@ uint8_t DmfControlBoard::UpdateChannel(const uint16_t channel,
   uint8_t port = (channel%40)/8;
   uint8_t bit = (channel%40)%8;
   Wire.beginTransmission(PCA9505_ADDRESS_+chip);
-  Wire.send(PCA9505_OUTPUT_PORT_REGISTER_+port);
+  Wire.write(PCA9505_OUTPUT_PORT_REGISTER_+port);
   Wire.endTransmission();
   Wire.requestFrom(PCA9505_ADDRESS_+chip,1);
   if (Wire.available()) {
-    uint8_t data = Wire.receive();
+    uint8_t data = Wire.read();
     bitWrite(data, bit, state==0);
     SendI2C(PCA9505_ADDRESS_+chip,
             PCA9505_OUTPUT_PORT_REGISTER_+port,

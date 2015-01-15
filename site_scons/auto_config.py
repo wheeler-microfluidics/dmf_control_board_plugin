@@ -4,7 +4,7 @@ import re
 
 from SCons.Script import Export
 
-from path_helpers import path
+from path import path
 from find_avrdude import get_arduino_paths
 
 
