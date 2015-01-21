@@ -274,7 +274,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 '''
                 view = MicrodropChannelsAssistantView(self.control_board)
                 def on_close(*args):
-                    view.to_hdf(self.calibrations_dir().joinpath('channels.h5'))
+                    view.to_hdf(self.calibrations_dir().joinpath('[%05d]-channels.h5' %
+                        self.control_board.serial_number))
                 view.widget.connect('close', on_close)
                 view.show()
 
