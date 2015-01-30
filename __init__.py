@@ -764,16 +764,14 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app = get_app()
         connected = self.control_board.connected()
         if connected:
-            try:
-                name = self.control_board.name()
-                version = self.control_board.hardware_version()
-                firmware = self.control_board.software_version()
-                n_channels = self.control_board.number_of_channels()
-                self.connection_status = name + " v" + version + \
-                    " (Firmware: " + str(firmware) + ")\n" + \
-                    str(n_channels) + " channels"
-            except:
-                pass
+            name = self.control_board.name()
+            version = self.control_board.hardware_version()
+            firmware = self.control_board.software_version()
+            n_channels = self.control_board.number_of_channels()
+            serial_number = self.control_board.serial_number
+            self.connection_status = ('%s v%s (Firmware: %s, S/N %03d)\n'
+            '%d channels' % (name, version, firmware, serial_number,
+                             n_channels))
 
         # Enable/disable control board menu items based on the connection
         # status of the control board.
@@ -1385,14 +1383,22 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             if val:
                 return
 
-        # otherwise, add the name, hardware version and firmware version
+        # otherwise, add the name, hardware version, serial number,
+        # and firmware version
         data = {}
         if self.control_board.connected():
             data["control board name"] = self.control_board.name()
+            data["control board serial number"] = \
+                self.control_board.serial_number
             data["control board hardware version"] = (self.control_board
                                                       .hardware_version())
             data["control board software version"] = (self.control_board
                                                       .software_version())
+            # add info about the devices on the i2c bus 
+            try:
+                data["i2c devices"] = (self.control_board._i2c_devices)
+            except:
+                pass
         log.add_data(data)
 
     def get_schedule_requests(self, function_name):
