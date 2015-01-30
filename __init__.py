@@ -17,7 +17,6 @@ You should have received a copy of the GNU General Public License
 along with dmf_control_board.  If not, see <http://www.gnu.org/licenses/>.
 """
 import os
-import logging
 import math
 import re
 from copy import deepcopy
@@ -412,10 +411,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
     def _callback_reset_watchdog(self):
         # only reset the watchdog if we are connected and not waiting for a
-        # reply 
-        if self.control_board.connected() and \
-        not self.control_board.waiting_for_reply():
+        # reply
+        if self.control_board.connected():
+            waiting_for_reply = self.control_board.waiting_for_reply()
+            if not waiting_for_reply:
+                logger.debug('Reset watchdog')
                 self.control_board.watchdog_state = True
+            else:
+                logger.debug("Don't reset watchdog. Waiting for reply to" 
+                             " previous command.")
         # [Return `True`][1] to request to be called again.
         #
         # [1]: http://www.pygtk.org/pygtk2reference/gobject-functions.html#function-gobject--timeout-add
@@ -509,15 +513,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             try:
                 config = yaml.load(filename.bytes())
             except:
-                logging.error('Error parsing control-board configuration '
-                              'file.\n\n'
-                              'Please ensure the configuration file is a valid'
-                              'YAML-encoded file.')
+                logger.error('Error parsing control-board configuration '
+                             'file.\n\n'
+                             'Please ensure the configuration file is a valid'
+                             'YAML-encoded file.')
             else:
                 self.control_board.write_config(config)
                 message = ('Successfully wrote persistent configuration '
                            'settings to control-board.')
-                logging.info(message)
+                logger.info(message)
                 info_dialog(message)
                 
     def save_config(self):
@@ -593,8 +597,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         [1] http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20calibration
         '''
         if not self.control_board.connected():
-            logging.error("A control board must be connected in order to "
-                          "edit configuration settings.")
+            logger.error("A control board must be connected in order to "
+                         "edit configuration settings.")
             return
 
         hardware_version = utility.Version.fromstring(
@@ -1227,25 +1231,29 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                   sampling_window_ms,
                                   n_sampling_windows,
                                   delay_between_windows_ms):
-        # figure out the maximum number of sampling windows we can collect
+        # Figure out the maximum number of sampling windows we can collect
         # before filling the serial buffer
+        # (MAX_PAYLOAD_LENGTH - 4 * sizeof(float)) /
+        #     (NUMBER_OF_ADC_CHANNELS * (sizeof(int8_t) + sizeof(int16_t)))
         n_sampling_windows_max = \
-            (self.control_board.MAX_PAYLOAD_LENGTH - 4) / 6
+            (self.control_board.MAX_PAYLOAD_LENGTH - 4 * 4) / (2 * (1 + 2))
 
         # if we're going to exceed this number, adjust the delay between
         # samples
         if n_sampling_windows > n_sampling_windows_max:
-
-            duration = (sampling_window_ms + delay_between_windows_ms) * \
-                n_sampling_windows
-            delay_between_windows_ms = duration / \
-                n_sampling_windows_max - sampling_window_ms
             logger.info('[DMFControlBoardPlugin] _check_n_sampling_windows():'
                         ' n_sampling_windows=%d > %d' % (n_sampling_windows,
-                                                         n_sampling_windows_max))
+                        n_sampling_windows_max))
+            duration = (sampling_window_ms + delay_between_windows_ms) * \
+                n_sampling_windows
+            delay_between_windows_ms = math.ceil(float(duration) / \
+                n_sampling_windows_max - sampling_window_ms)
+            n_sampling_windows = int(math.floor(duration / \
+                (sampling_window_ms + delay_between_windows_ms)))  
             logger.info('[DMFControlBoardPlugin] _check_n_sampling_windows():'
-                        ' delay_between_windows_ms=%d' % delay_between_windows_ms)
-            return n_sampling_windows_max, delay_between_windows_ms
+                        ' delay_between_windows_ms=%d, n_sampling_windows=%d' % 
+                        (delay_between_windows_ms, n_sampling_windows))
+            return n_sampling_windows, delay_between_windows_ms
         return n_sampling_windows, delay_between_windows_ms
 
     def measure_impedance_non_blocking(self,
