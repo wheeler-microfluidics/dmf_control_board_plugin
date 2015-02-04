@@ -26,7 +26,9 @@ try:
     import cPickle as pickle
 except ImportError:
     import pickle
+import warnings
 
+import tables
 import gtk
 import numpy as np
 import pandas as pd
@@ -60,6 +62,11 @@ from dmf_control_board_firmware.calibrate.impedance_benchmarks import (
 from .wizards import (MicrodropImpedanceAssistantView,
                       MicrodropReferenceAssistantView)
 
+
+# Ignore natural name warnings from PyTables [1].
+#
+# [1]: https://www.mail-archive.com/pytables-users@lists.sourceforge.net/msg01130.html
+warnings.simplefilter('ignore', tables.NaturalNameWarning)
 
 class AmplifierGainNotCalibrated(Exception):
     pass
@@ -301,7 +308,7 @@ class FeedbackOptionsController():
     def on_measure_cap_liquid(self, widget, data=None):
         self.plugin.control_board.calibration._C_drop = \
             self.measure_device_capacitance()
-            
+
     def measure_device_capacitance(self):
         app = get_app()
         area = self.plugin.get_actuated_area()
@@ -348,7 +355,7 @@ class FeedbackOptionsController():
             capacitance = np.mean(results.capacitance())
             logging.info('\tcapacitance = %e F (%e F/mm^2)' % \
                      (capacitance, capacitance / area))
-            
+
         capacitance = np.mean(results.capacitance())
         logging.info('mean(capacitance) = %e F (%e F/mm^2)' % \
                      (capacitance, capacitance / area))
@@ -358,13 +365,13 @@ class FeedbackOptionsController():
                     dmf_options.frequency,
                     interface=IWaveformGenerator)
         self.plugin.check_impedance(dmf_options)
-        
+
         # turn off all electrodes if we're not in realtime mode
         if not app.realtime_mode:
             self.plugin.control_board.set_state_of_all_channels(
                 np.zeros(self.plugin.control_board.number_of_channels())
             )
-            
+
         return dict(frequency=results.frequency.tolist(),
                     capacitance=(np.mean(results.capacitance(), 1) / area). \
                         tolist())
@@ -1681,7 +1688,7 @@ class FeedbackCalibrationController():
                                                             'config.yml')
             )
             view.to_hdf(
-                calibrations_dir.joinpath(prefix + 
+                calibrations_dir.joinpath(prefix +
                                           'calibration-reference-load.h5')
             )
 
