@@ -20,7 +20,9 @@ import os
 import math
 import re
 from copy import deepcopy
+import warnings
 
+import tables
 from datetime import datetime
 from pygtkhelpers.ui.dialogs import info as info_dialog
 import yaml
@@ -54,6 +56,11 @@ from serial_device import SerialDevice, get_serial_ports
 from nested_structures import apply_depth_first, apply_dict_depth_first
 from .wizards import MicrodropChannelsAssistantView
 
+
+# Ignore natural name warnings from PyTables [1].
+#
+# [1]: https://www.mail-archive.com/pytables-users@lists.sourceforge.net/msg01130.html
+warnings.simplefilter('ignore', tables.NaturalNameWarning)
 
 PluginGlobals.push_env('microdrop.managed')
 
@@ -347,10 +354,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     app_values['serial_port']):
                 reconnect = True
 
-            # If we're not reconnecting, we need to update the watchdog timer 
+            # If we're not reconnecting, we need to update the watchdog timer
             if self.control_board.connected() and not reconnect:
                 self._update_watchdog(app_values['auto_atx_power_off'])
-                
+
             if reconnect:
                 self.connect()
 
@@ -418,7 +425,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 logger.debug('Reset watchdog')
                 self.control_board.watchdog_state = True
             else:
-                logger.debug("Don't reset watchdog. Waiting for reply to" 
+                logger.debug("Don't reset watchdog. Waiting for reply to"
                              " previous command.")
         # [Return `True`][1] to request to be called again.
         #
@@ -523,7 +530,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                            'settings to control-board.')
                 logger.info(message)
                 info_dialog(message)
-                
+
     def save_config(self):
         '''
         ## `save_config` ##
@@ -1247,9 +1254,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             delay_between_windows_ms = math.ceil(float(duration) / \
                 n_sampling_windows_max - sampling_window_ms)
             n_sampling_windows = int(math.floor(duration / \
-                (sampling_window_ms + delay_between_windows_ms)))  
+                (sampling_window_ms + delay_between_windows_ms)))
             logger.info('[DMFControlBoardPlugin] _check_n_sampling_windows():'
-                        ' delay_between_windows_ms=%d, n_sampling_windows=%d' % 
+                        ' delay_between_windows_ms=%d, n_sampling_windows=%d' %
                         (delay_between_windows_ms, n_sampling_windows))
             return n_sampling_windows, delay_between_windows_ms
         return n_sampling_windows, delay_between_windows_ms
@@ -1394,7 +1401,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                                       .hardware_version())
             data["control board software version"] = (self.control_board
                                                       .software_version())
-            # add info about the devices on the i2c bus 
+            # add info about the devices on the i2c bus
             try:
                 data["i2c devices"] = (self.control_board._i2c_devices)
             except:
