@@ -18,5 +18,6 @@ with open('properties.yml', 'w') as f:
 # create the tar.gz plugin archive
 with tarfile.open("%s-%s.tar.gz" % (package_name, version), "w:gz") as tar:
     for name in ['__init__.py', 'feedback.py', 'glade', 'properties.yml',
-                 'hooks', 'on_plugin_install.py', 'requirements.txt', 'wizards.py']:
+                 'hooks', 'on_plugin_install.py', 'requirements.txt', 'wizards.py',
+                 'COPYING', 'CHANGELOG']:
         tar.add(name)
