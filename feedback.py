@@ -302,11 +302,11 @@ class FeedbackOptionsController():
         return True
 
     def on_measure_cap_filler(self, widget, data=None):
-        self.plugin.control_board.calibration._C_filler = \
+        self.plugin.control_board.calibration._c_filler = \
             self.measure_device_capacitance()
 
     def on_measure_cap_liquid(self, widget, data=None):
-        self.plugin.control_board.calibration._C_drop = \
+        self.plugin.control_board.calibration._c_drop = \
             self.measure_device_capacitance()
 
     def measure_device_capacitance(self):
@@ -1478,8 +1478,8 @@ class FeedbackCalibrationController():
             if len(calibration_list) == 1:
                 # If we only have one calibration result entry, set the default
                 # value for the edit dialog to the value from the result entry.
-                settings["C_drop"] = calibration.C_drop(frequency)
-                settings["C_filler"] = calibration.C_filler(frequency)
+                settings["c_drop"] = calibration.c_drop(frequency)
+                settings["c_filler"] = calibration.c_filler(frequency)
                 for i in range(len(calibration.R_hv)):
                     settings['R_hv_%d' % i] = calibration.R_hv[i]
                     settings['C_hv_%d' % i] = calibration.C_hv[i]
@@ -1494,8 +1494,8 @@ class FeedbackCalibrationController():
                 def check_group_value(name, new):
                     if settings[name] and settings[name] != new:
                         settings[name] = None
-                check_group_value("C_drop", calibration.C_drop(frequency))
-                check_group_value("C_filler", calibration.C_filler(frequency))
+                check_group_value("c_drop", calibration.c_drop(frequency))
+                check_group_value("c_filler", calibration.c_filler(frequency))
                 for i in range(len(calibration.R_hv)):
                     check_group_value('R_hv_%d' % i, calibration.R_hv[i])
                     check_group_value('C_hv_%d' % i, calibration.C_hv[i])
@@ -1514,8 +1514,8 @@ class FeedbackCalibrationController():
             schema_entries.append(String.named(name).using(
                 default=string_value, optional=True))
 
-        set_field_value('C_drop', 1e12)
-        set_field_value('C_filler', 1e12)
+        set_field_value('c_drop', 1e12)
+        set_field_value('c_filler', 1e12)
 
         for i in range(len(calibration.R_hv)):
             set_field_value('R_hv_%d' % i)
@@ -1547,14 +1547,14 @@ class FeedbackCalibrationController():
                               (name, response[name]))
             return None
 
-        value = get_field_value('C_drop', 1e12)
+        value = get_field_value('c_drop', 1e12)
         if value:
             for calibration in calibration_list:
-                calibration._C_drop = value
-        value = get_field_value('C_filler', 1e12)
+                calibration._c_drop = value
+        value = get_field_value('c_filler', 1e12)
         if value:
             for calibration in calibration_list:
-                calibration._C_filler = value
+                calibration._c_filler = value
         for i in range(len(calibration.R_hv)):
             value = get_field_value('R_hv_%d' % i)
             if value:

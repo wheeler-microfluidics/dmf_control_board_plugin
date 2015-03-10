@@ -1035,10 +1035,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         normalized_capacitance = np.ma.masked_invalid(results.capacitance() /
             area)
 
-        if (self.control_board.calibration._C_drop and
+        if (self.control_board.calibration._c_drop and
                 np.max(normalized_capacitance) <
                 options.feedback_options.action.percent_threshold / 100.0 *
-                self.control_board.calibration.C_drop(options.frequency)):
+                self.control_board.calibration.c_drop(options.frequency)):
             logger.info('step=%d: attempt=%d, max(C)/A=%.1e F/mm^2. Repeat' %
                         (app.protocol.current_step_number,
                          app.protocol.current_step_attempt,
