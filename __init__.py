@@ -342,6 +342,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             pgc.update_grid()
 
     def on_app_options_changed(self, plugin_name):
+        app = get_app()
         if plugin_name == self.name:
             app_values = self.get_app_values()
             reconnect = False
@@ -360,6 +361,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             if reconnect:
                 self.connect()
+        elif plugin_name == app.name:
+            # Turn off all electrodes if we're not in realtime mode and not
+            # running a protocol.
+            if (self.control_board.connected() and not app.realtime_mode and
+                not app.running):
+                logger.info('Turning off all electrodes.')
+                self.control_board.set_state_of_all_channels(
+                    np.zeros(self.control_board.number_of_channels())
+                )
 
     def connect(self):
         '''
@@ -973,7 +983,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             # running a protocol.
             elif (self.control_board.connected() and not app.realtime_mode and
                   not app.running):
-                # Turn off all electrodes.
+                logger.info('Turning off all electrodes.')
                 self.control_board.set_state_of_all_channels(
                     np.zeros(self.control_board.number_of_channels())
                 )
@@ -1166,7 +1176,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app = get_app()
         self._kill_running_step()
         if self.control_board.connected() and not app.realtime_mode:
-            # turn off all electrodes
+            # Turn off all electrodes
+            logger.info('Turning off all electrodes.')
             self.control_board.set_state_of_all_channels(
                 np.zeros(self.control_board.number_of_channels()))
 
@@ -1416,6 +1427,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         if function_name in ['on_step_options_changed']:
             return [ScheduleRequest(self.name,
                                     'microdrop.gui.protocol_grid_controller')]
+        elif function_name == 'on_app_options_changed':
+            return [ScheduleRequest('microdrop.app', self.name)]
         return []
 
     def configurations_dir(self):
