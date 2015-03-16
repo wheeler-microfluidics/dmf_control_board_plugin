@@ -801,10 +801,19 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
     def on_device_impedance_update(self, results):
         app = get_app()
-        app.main_window_controller.label_control_board_status\
-           .set_text(self.connection_status + ", Voltage: %.1f V" %
-                     results.V_actuation()[-1])
+        label = (self.connection_status + ', Voltage: %.1f V' %
+                 results.V_actuation()[-1])
+        
+        # add normalized force to the label if we've calibrated the device 
+        if results.calibration._c_drop:
+            label += (u'\nForce: %.1f \u03BCN/mm (c<sub>device</sub>='
+                      '%.1f pF/mm<sup>2</sup>)' % 
+                      (np.mean(1e6 * results.force(Ly=1.0)),
+                      1e12*results.calibration.c_drop(results.frequency)))
 
+        app.main_window_controller.label_control_board_status\
+           .set_markup(label)
+        
         options = self.get_step_options()
         feedback_options = options.feedback_options
 
