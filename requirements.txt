@@ -1,3 +1,3 @@
-wheeler.dmf-control-board-firmware==1.0.post6
+wheeler.dmf-control-board-firmware==1.0.post12
 serial_device
 nested_structures
