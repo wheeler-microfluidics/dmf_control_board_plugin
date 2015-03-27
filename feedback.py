@@ -28,6 +28,7 @@ except ImportError:
     import pickle
 import warnings
 
+import yaml
 import tables
 import gtk
 import numpy as np
@@ -302,12 +303,14 @@ class FeedbackOptionsController():
         return True
 
     def on_measure_cap_filler(self, widget, data=None):
-        self.plugin.control_board.calibration._c_filler = \
-            self.measure_device_capacitance()
+        c = self.measure_device_capacitance() 
+        self.plugin.control_board.calibration._c_filler = c
+        self.plugin.set_app_values(dict(c_filler=yaml.dump(c)))
 
     def on_measure_cap_liquid(self, widget, data=None):
-        self.plugin.control_board.calibration._c_drop = \
-            self.measure_device_capacitance()
+        c = self.measure_device_capacitance() 
+        self.plugin.control_board.calibration._c_drop = c
+        self.plugin.set_app_values(dict(c_drop=yaml.dump(c)))
 
     def measure_device_capacitance(self):
         app = get_app()

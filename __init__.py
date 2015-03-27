@@ -30,7 +30,7 @@ import gtk
 import gobject
 import numpy as np
 from path_helpers import path
-from flatland import Integer, Boolean, Float, Form, Enum
+from flatland import Integer, Boolean, Float, Form, Enum, String
 from flatland.validation import ValueAtLeast, ValueAtMost, Validator
 import microdrop_utility as utility
 from microdrop_utility.user_paths import home_dir
@@ -148,6 +148,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         .using(default=115200, optional=True, validators=[ValueAtLeast(minimum=0),
                                                      ],),
         Boolean.named('auto_atx_power_off').using(default=False, optional=True),
+        String.named('c_drop').using(default='', optional=True,
+                                     properties={'show_in_gui':
+                                                 False}),
+        String.named('c_filler').using(default='', optional=True,
+                                     properties={'show_in_gui':
+                                                 False}),
     )
 
     StepFields = Form.of(
@@ -347,13 +353,33 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             app_values = self.get_app_values()
             reconnect = False
 
-            if (self.control_board.connected() and self.control_board.baud_rate
-                    != app_values['baud_rate']):
-                self.control_board.baud_rate = app_values['baud_rate']
-                reconnect = True
-            if (self.control_board.connected() and self.control_board.port !=
-                    app_values['serial_port']):
-                reconnect = True
+            if self.control_board.connected():
+                if 'c_drop' in app_values and \
+                    self.control_board.calibration._c_drop is None:
+                        c_drop = yaml.load(app_values['c_drop'])
+                        if c_drop is not None and len(c_drop):
+                            response = yesno(
+                                "Use cached value for c<sub>drop</sub>?")
+                            if response == gtk.RESPONSE_YES:
+                                self.control_board.calibration._c_drop = c_drop
+                            else:
+                                self.set_app_values(dict(c_drop=""))
+                if 'c_filler' in app_values and \
+                    self.control_board.calibration._c_filler is None:
+                        c_filler = yaml.load(app_values['c_filler'])
+                        if c_filler is not None and len(c_filler):
+                            response = yesno(
+                                "Use cached value for c<sub>filler</sub>?")
+                            if response == gtk.RESPONSE_YES:
+                                self.control_board.calibration._c_filler = \
+                                    c_filler
+                            else:
+                                self.set_app_values(dict(c_filler=""))
+                if self.control_board.baud_rate != app_values['baud_rate']:
+                    self.control_board.baud_rate = app_values['baud_rate']
+                    reconnect = True
+                if self.control_board.port != app_values['serial_port']:
+                    reconnect = True
 
             # If we're not reconnecting, we need to update the watchdog timer
             if self.control_board.connected() and not reconnect:
