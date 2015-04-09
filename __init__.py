@@ -400,7 +400,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     def connect(self):
         '''
         Try to connect to the control board at the default serial port selected
-        in the MicroDrop application options.
+        in the Microdrop application options.
 
         If unsuccessful, try to connect to the control board on any available
         serial port, one-by-one.
@@ -430,7 +430,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         if enabled:
             try:
                 # Try to enable watchdog-timer to shut off power supply when
-                # the `MicroDrop` app is closed.
+                # the `Microdrop` app is closed.
                 self.control_board.watchdog_state = True
                 self.control_board.watchdog_enabled = True
                 if self.watchdog_timeout_id is None:
