@@ -66,8 +66,8 @@ PluginGlobals.push_env('microdrop.managed')
 
 
 class DMFControlBoardOptions(object):
-    def __init__(self, duration=100, voltage=100, frequency=10e3,
-                 feedback_options=None):
+    def __init__(self, duration=100, voltage=100.0, frequency=10e3,
+                 feedback_options=None, force=25.0):
         self.duration = duration
         if feedback_options is None:
             self.feedback_options = FeedbackOptions()
@@ -75,6 +75,7 @@ class DMFControlBoardOptions(object):
             self.feedback_options = feedback_options
         self.voltage = voltage
         self.frequency = frequency
+        self.force = force
 
 
 def format_func(value):
@@ -148,6 +149,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         .using(default=115200, optional=True, validators=[ValueAtLeast(minimum=0),
                                                      ],),
         Boolean.named('auto_atx_power_off').using(default=False, optional=True),
+        Boolean.named('use_force_normalization').using(default=False, optional=True),
         String.named('c_drop').using(default='', optional=True,
                                      properties={'show_in_gui':
                                                  False}),
@@ -163,6 +165,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Float.named('voltage').using(default=100, optional=True,
                                      validators=[ValueAtLeast(minimum=0),
                                                  max_voltage]),
+        Float.named('force').using(default=25, optional=True,
+                                   validators=[ValueAtLeast(minimum=0),]),
         Float.named('frequency').using(default=10e3, optional=True,
                                        validators=[ValueAtLeast(minimum=0),
                                                    check_frequency]),
@@ -333,8 +337,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.feedback_results_controller.feedback_results_menu_item.show()
         if get_app().protocol:
             self.on_step_run()
-            pgc = get_service_instance(ProtocolGridController, env='microdrop')
-            pgc.update_grid()
+            self._update_protocol_grid()
 
     def on_plugin_disable(self):
         self.feedback_options_controller.on_plugin_disable()
@@ -344,8 +347,37 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.feedback_results_controller.feedback_results_menu_item.hide()
         if get_app().protocol:
             self.on_step_run()
-            pgc = get_service_instance(ProtocolGridController, env='microdrop')
-            pgc.update_grid()
+            self._update_protocol_grid()
+
+    def on_protocol_swapped(self, old_protocol, protocol):
+        self._update_protocol_grid()
+        
+    def _update_protocol_grid(self):
+        app = get_app()
+        app_values = self.get_app_values()
+        pgc = get_service_instance(ProtocolGridController, env='microdrop')
+        if pgc.enabled_fields:
+            if self.name in pgc.enabled_fields.keys():
+                if app_values['use_force_normalization']:
+                    if 'voltage' in pgc.enabled_fields[self.name]:
+                        pgc.enabled_fields[self.name].remove('voltage')
+                    if 'force' not in pgc.enabled_fields[self.name]:
+                        pgc.enabled_fields[self.name].add('force')
+
+                    if app.protocol and self.control_board.calibration._c_drop:
+                        for i, step in enumerate(app.protocol):
+                            options = self.get_step_options(i)
+                            options.voltage = self.control_board.force_to_voltage(
+                                options.force,
+                                options.frequency
+                            )
+                else:
+                    if 'force' in pgc.enabled_fields[self.name]:
+                        pgc.enabled_fields[self.name].remove('force')
+                    if 'voltage' not in pgc.enabled_fields[self.name]:
+                        pgc.enabled_fields[self.name].add('voltage')
+                        
+                pgc.update_grid()
 
     def on_app_options_changed(self, plugin_name):
         app = get_app()
@@ -387,6 +419,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             if reconnect:
                 self.connect()
+                
+            self._update_protocol_grid()
         elif plugin_name == app.name:
             # Turn off all electrodes if we're not in realtime mode and not
             # running a protocol.
@@ -1413,6 +1447,14 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         logger.debug('[DMFControlBoardPlugin] on_step_options_changed(): %s '
                      'step #%d' % (plugin, step_number))
         app = get_app()
+        app_values = self.get_app_values()
+        options = self.get_step_options()
+        if (app_values['use_force_normalization'] and 
+            self.control_board.calibration._c_drop):
+            options.voltage = self.control_board.force_to_voltage(
+                options.force,
+                options.frequency
+            )
         if self.feedback_options_controller:
             self.feedback_options_controller\
                 .on_step_options_changed(plugin, step_number)
@@ -1461,9 +1503,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         """
         if function_name in ['on_step_options_changed']:
             return [ScheduleRequest(self.name,
-                                    'microdrop.gui.protocol_grid_controller')]
+                                    'microdrop.gui.protocol_grid_controller'),
+                    ScheduleRequest(self.name,
+                                    'microdrop.gui.protocol_controller'),
+                    ]
         elif function_name == 'on_app_options_changed':
             return [ScheduleRequest('microdrop.app', self.name)]
+        elif function_name == 'on_protocol_swapped':
+            return [ScheduleRequest('microdrop.gui.protocol_grid_controller',
+                                    self.name)]
         return []
 
     def configurations_dir(self):
