@@ -1,3 +1,10 @@
+= Version 1.0.10 =
+ * Turn off all switches when realtime mode is disabled
+ * Display force and capacitance in the status window
+ * Cache device capacitance calibration
+ * Raise exception when current limit (10mA) is exceeded
+ * Reduce max capacitance for calibration test to 5mA
+
 = Version 1.0 =
  * Add i2c_scan function and log i2c devices on connect
  * Log version info, S/N and Aref on connection
