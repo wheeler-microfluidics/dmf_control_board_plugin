@@ -66,17 +66,31 @@ PluginGlobals.push_env('microdrop.managed')
 
 
 class DMFControlBoardOptions(object):
+    _default_force = 25.0
+    
     def __init__(self, duration=100, voltage=100.0, frequency=10e3,
-                 feedback_options=None, force=25.0):
+                 feedback_options=None, force=None):
         self.duration = duration
         if feedback_options is None:
             self.feedback_options = FeedbackOptions()
         else:
             self.feedback_options = feedback_options
+        if force is None:
+            force = self._default_force
         self.voltage = voltage
         self.frequency = frequency
         self.force = force
 
+    def __setstate__(self, state):
+        self.__dict__ = state
+        self._upgrade()
+
+    def _upgrade(self):
+        """
+        Upgrade the serialized object if necessary.
+        """
+        if not hasattr(self, 'force'):
+            self.force = self._default_force
 
 def format_func(value):
     if value:
