@@ -326,6 +326,12 @@ class FeedbackOptionsController():
 
         # get the current state of channels
         state = app.dmf_device_controller.get_step_options().state_of_channels
+        n_channels = self.plugin.control_board.number_of_channels()
+        
+        # pad state with zeros if necessary
+        if len(state) < n_channels:
+            state = np.pad(state, (0, n_channels - len(state)),
+                           'constant', constant_values=(0,0))
 
         voltage = dmf_options.voltage
         emit_signal("set_voltage", voltage, interface=IWaveformGenerator)
