@@ -921,7 +921,11 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                      1)
             else:
                 self.n_voltage_adjustments = None
-                logger.error("Unable to achieve the specified voltage.")
+                if app.running:
+                    elf._voltage_tolerance_error_flag = True
+                    logger.info('Voltage tolerance exceeded!')
+                else:
+                    logger.warning('Failed to achieve the specified voltage.')
 
         if (self.control_board.auto_adjust_amplifier_gain and not
                 self.amplifier_gain_initialized):
@@ -1245,6 +1249,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Handler called when a protocol starts running.
         """
         app = get_app()
+        self._voltage_tolerance_error_flag = False
         if not self.control_board.connected():
             logger.warning("Warning: no control board connected.")
         elif (self.control_board.number_of_channels() <=
@@ -1263,6 +1268,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             logger.info('Turning off all electrodes.')
             self.control_board.set_state_of_all_channels(
                 np.zeros(self.control_board.number_of_channels()))
+            if self._voltage_tolerance_error_flag:
+                logger.warning('Some steps in the protocol failed to achieve '
+                               'the specified voltage.')
+
 
     def on_experiment_log_selection_changed(self, data):
         """
