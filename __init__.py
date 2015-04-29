@@ -905,9 +905,13 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             # if the signal is less than the voltage tolerance
             if results.V_actuation()[-1] < self.control_board.voltage_tolerance:
-                logger.error("Low voltage detected. Please check that the "
-                             "amplifier is on.")
-                return
+                if app.running:
+                    self._voltage_tolerance_error_flag = True
+                    logger.info('Low voltage detected.')
+                else:
+                    logger.error("Low voltage detected. Please check that the "
+                                 "amplifier is on.")
+                    return
 
             # allow maximum of 5 adjustment attempts
             if (self.control_board.auto_adjust_amplifier_gain and
@@ -922,7 +926,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             else:
                 self.n_voltage_adjustments = None
                 if app.running:
-                    elf._voltage_tolerance_error_flag = True
+                    self._voltage_tolerance_error_flag = True
                     logger.info('Voltage tolerance exceeded!')
                 else:
                     logger.warning('Failed to achieve the specified voltage.')

@@ -1,3 +1,9 @@
+= Version 1.0.17 =
+ * Add force normalization option
+ * Fix problem with updating configuration settings after "device load" calibration
+ * Ignore voltage tolerance errors until protocol conmpletes
+ * Other bug fixes
+
 = Version 1.0.10 =
  * Turn off all switches when realtime mode is disabled
  * Display force and capacitance in the status window
