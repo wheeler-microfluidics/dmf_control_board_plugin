@@ -378,7 +378,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     if 'force' not in pgc.enabled_fields[self.name]:
                         pgc.enabled_fields[self.name].add('force')
 
-                    if app.protocol and self.control_board.calibration._c_drop:
+                    if (app.protocol and self.control_board.calibration and 
+                        self.control_board.calibration._c_drop
+                    ):
                         for i, step in enumerate(app.protocol):
                             options = self.get_step_options(i)
                             options.voltage = self.control_board.force_to_voltage(
