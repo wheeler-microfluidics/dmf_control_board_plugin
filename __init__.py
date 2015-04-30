@@ -1287,13 +1287,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self._kill_running_step()
         if self.control_board.connected() and not app.realtime_mode:
             # Turn off all electrodes
-            logger.info('Turning off all electrodes.')
+            logger.debug('Turning off all electrodes.')
             self.control_board.set_state_of_all_channels(
                 np.zeros(self.control_board.number_of_channels()))
             if self._voltage_tolerance_error_flag:
                 logger.warning('Some steps in the protocol failed to achieve '
                                'the specified voltage.')
-
 
     def on_experiment_log_selection_changed(self, data):
         """
@@ -1493,7 +1492,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                      'step #%d' % (plugin, step_number))
         app = get_app()
         app_values = self.get_app_values()
-        options = self.get_step_options()
+        options = self.get_step_options(step_number)
         if (app_values['use_force_normalization'] and 
             self.control_board.calibration and 
             self.control_board.calibration._c_drop

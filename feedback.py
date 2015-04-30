@@ -399,34 +399,55 @@ class FeedbackOptionsController():
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
         options.feedback_enabled = widget.get_active()
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
 
+    def _update_feedback_options(self, feedback_options):
+        app = get_app()
+        # copy the current step's feedback options to all selected steps
+        pgc = get_service_instance_by_name(
+            'microdrop.gui.protocol_grid_controller',
+            env='microdrop'
+        )
+        for step_number in pgc.widget.selected_ids:
+            if step_number == app.protocol.current_step_number:
+                continue
+            step = app.protocol.steps[step_number]
+            options = step.get_data(self.plugin.name)
+            options.feedback_options = deepcopy(feedback_options)
+            step.set_data(self.plugin.name, options)
+            emit_signal('on_step_options_changed',
+                        [self.plugin.name, step_number],
+                        interface=IPlugin)
+
     def on_step_options_changed(self, plugin_name, step_number):
         app = get_app()
         app_values = self.plugin.get_app_values()
-        if (self.plugin.name == plugin_name and
-                app.protocol.current_step_number == step_number):
-            all_options = self.plugin.get_step_options(step_number)
-            options = all_options.feedback_options
+        options = self.plugin.get_step_options(step_number)
+        feedback_options = options.feedback_options
 
-            if (app_values['use_force_normalization'] and 
-                self.plugin.control_board.calibration and 
-                self.plugin.control_board.calibration._c_drop
-            ):
-                options.action.increase_voltage = (
-                    self.plugin.control_board.force_to_voltage(
-                        all_options.force + options.action.increase_force,
-                        all_options.frequency
-                    ) -
-                    self.plugin.control_board.force_to_voltage(
-                        all_options.force,
-                        all_options.frequency
-                    )
+        if (feedback_options.action.__class__ ==  RetryAction and
+            app_values['use_force_normalization'] and 
+            self.plugin.control_board.calibration and 
+            self.plugin.control_board.calibration._c_drop
+        ):
+            feedback_options.action.increase_voltage = (
+                self.plugin.control_board.force_to_voltage(
+                    options.force + feedback_options.action.increase_force,
+                    options.frequency
+                ) -
+                self.plugin.control_board.force_to_voltage(
+                    options.force,
+                    options.frequency
                 )
-            self._set_gui_sensitive(options)
-            self._update_gui_state(options)
+            )
+        if (self.plugin.name == plugin_name and 
+            app.protocol.current_step_number == step_number
+        ):
+            self._set_gui_sensitive(feedback_options)
+            self._update_gui_state(feedback_options)
 
     def on_app_options_changed(self, plugin_name):
         if self.plugin.name == plugin_name:
@@ -607,6 +628,7 @@ class FeedbackOptionsController():
         if retry and options.action.__class__ != RetryAction:
             options.action = RetryAction()
         if retry:
+            self._update_feedback_options(options)
             emit_signal('on_step_options_changed',
                         [self.plugin.name, app.protocol.current_step_number],
                         interface=IPlugin)
@@ -626,6 +648,7 @@ class FeedbackOptionsController():
                 SweepFrequencyAction):
             options.action = SweepFrequencyAction()
         if sweep_frequency:
+            self._update_feedback_options(options)
             emit_signal('on_step_options_changed',
                         [self.plugin.name, app.protocol.current_step_number],
                         interface=IPlugin)
@@ -644,6 +667,7 @@ class FeedbackOptionsController():
         if sweep_voltage and options.action.__class__ != SweepVoltageAction:
             options.action = SweepVoltageAction()
         if sweep_voltage:
+            self._update_feedback_options(options)
             emit_signal('on_step_options_changed',
                         [self.plugin.name, app.protocol.current_step_number],
                         interface=IPlugin)
@@ -663,6 +687,7 @@ class FeedbackOptionsController():
                 SweepElectrodesAction):
             options.action = SweepElectrodesAction()
         if sweep_electrodes:
+            self._update_feedback_options(options)
             emit_signal('on_step_options_changed',
                         [self.plugin.name, app.protocol.current_step_number],
                         interface=IPlugin)
@@ -689,13 +714,14 @@ class FeedbackOptionsController():
         Update the percent threshold value for the current step.
         """
         app = get_app()
-        all_options = self.plugin.get_step_options()
-        options = all_options.feedback_options
+        options = self.plugin.get_step_options().feedback_options
         options.action.percent_threshold = textentry_validate(
             widget, options.action.percent_threshold, float)
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
-                    interface=IPlugin)
+                    interface=IPlugin
+        )
 
     def on_textentry_increase_voltage_focus_out_event(self, widget, event):
         """
@@ -739,9 +765,11 @@ class FeedbackOptionsController():
         else:
             options.action.increase_voltage = textentry_validate(
                 widget, options.action.increase_voltage, float)
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
-                    interface=IPlugin)
+                    interface=IPlugin
+        )
 
     def on_textentry_max_repeats_focus_out_event(self, widget, event):
         """
@@ -767,6 +795,7 @@ class FeedbackOptionsController():
         options = all_options.feedback_options
         options.action.max_repeats = textentry_validate(
             widget, options.action.max_repeats, int)
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
@@ -795,6 +824,7 @@ class FeedbackOptionsController():
         options = all_options.feedback_options
         options.action.start_frequency = textentry_validate(
             widget, options.action.start_frequency / 1e3, float) * 1e3
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
@@ -823,6 +853,7 @@ class FeedbackOptionsController():
         options = all_options.feedback_options
         options.action.end_frequency = textentry_validate(
             widget, options.action.end_frequency / 1e3, float) * 1e3
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
@@ -852,6 +883,7 @@ class FeedbackOptionsController():
         options = all_options.feedback_options
         options.action.n_frequency_steps = textentry_validate(
             widget, options.action.n_frequency_steps, float)
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
@@ -880,6 +912,7 @@ class FeedbackOptionsController():
         options = all_options.feedback_options
         options.action.start_voltage = textentry_validate(
             widget, options.action.start_voltage, float)
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
@@ -908,6 +941,7 @@ class FeedbackOptionsController():
         options = all_options.feedback_options
         options.action.end_voltage = textentry_validate(
             widget, options.action.end_voltage, float)
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
@@ -936,6 +970,7 @@ class FeedbackOptionsController():
         options = all_options.feedback_options
         options.action.n_voltage_steps = textentry_validate(
             widget, options.action.n_voltage_steps, float)
+        self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
@@ -966,6 +1001,7 @@ class FeedbackOptionsController():
             channels = SetOfInts(widget.get_text())
             assert(min(channels) >= 0)
             options.action.channels = channels
+            self._update_feedback_options(options)
             emit_signal('on_step_options_changed',
                         [self.plugin.name, app.protocol.current_step_number],
                         interface=IPlugin)
