@@ -446,6 +446,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 self.control_board.set_state_of_all_channels(
                     np.zeros(self.control_board.number_of_channels())
                 )
+        if self.feedback_options_controller:
+            self.feedback_options_controller\
+                .on_app_options_changed(plugin_name)
+
 
     def connect(self):
         '''
@@ -994,10 +998,22 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     if feedback_options.action.__class__ == RetryAction:
                         attempt = app.protocol.current_step_attempt
                         if attempt <= feedback_options.action.max_repeats:
-                            voltage = (options.voltage +
-                                       feedback_options.action.increase_voltage
-                                       * attempt)
                             frequency = options.frequency
+                            if (app_values['use_force_normalization'] and 
+                                self.control_board.calibration and 
+                                self.control_board.calibration._c_drop
+                            ):
+                                voltage = self.control_board.force_to_voltage(
+                                    options.force + 
+                                    feedback_options.action.increase_force *
+                                    attempt,
+                                    options.frequency
+                                )
+                            else:
+                                voltage = (options.voltage +
+                                    feedback_options.action.increase_voltage *
+                                    attempt
+                                )
                             emit_signal("set_voltage", voltage,
                                         interface=IWaveformGenerator)
                             if frequency != self.current_frequency:
@@ -1479,7 +1495,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app_values = self.get_app_values()
         options = self.get_step_options()
         if (app_values['use_force_normalization'] and 
-            self.control_board.calibration._c_drop):
+            self.control_board.calibration and 
+            self.control_board.calibration._c_drop
+        ):
             options.voltage = self.control_board.force_to_voltage(
                 options.force,
                 options.frequency

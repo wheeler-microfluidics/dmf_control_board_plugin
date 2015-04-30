@@ -74,24 +74,25 @@ class AmplifierGainNotCalibrated(Exception):
 
 
 class RetryAction():
-    class_version = str(Version(0, 1))
+    class_version = str(Version(0, 2))
 
     def __init__(self,
                  percent_threshold=None,
                  increase_voltage=None,
-                 max_repeats=None):
-        if percent_threshold:
-            self.percent_threshold = percent_threshold
-        else:
-            self.percent_threshold = 0
-        if increase_voltage:
-            self.increase_voltage = increase_voltage
-        else:
-            self.increase_voltage = 0
-        if max_repeats:
-            self.max_repeats = max_repeats
-        else:
-            self.max_repeats = 3
+                 max_repeats=None,
+                 increase_force=None):
+        if percent_threshold is None:
+            percent_threshold = 0
+        if increase_voltage is None:
+            increase_voltage = 0
+        if max_repeats is None:
+            max_repeats = 3
+        if increase_force is None:
+            increase_force = 0
+        self.percent_threshold = percent_threshold
+        self.increase_voltage = increase_voltage
+        self.max_repeats = max_repeats
+        self.increase_force = increase_force
         self.version = self.class_version
 
     def __setstate__(self, dict):
@@ -121,6 +122,11 @@ class RetryAction():
                 del self.capacitance_threshold
                 self.percent_threshold = 0
                 self.version = str(Version(0, 1))
+                logging.info('[RetryAction] upgrade to version %s' %
+                             self.version)
+            if version < Version(0, 2):
+                self.increase_force = 0
+                self.version = str(Version(0, 2))
                 logging.info('[RetryAction] upgrade to version %s' %
                              self.version)
         else:
@@ -399,14 +405,54 @@ class FeedbackOptionsController():
 
     def on_step_options_changed(self, plugin_name, step_number):
         app = get_app()
+        app_values = self.plugin.get_app_values()
         if (self.plugin.name == plugin_name and
                 app.protocol.current_step_number == step_number):
             all_options = self.plugin.get_step_options(step_number)
             options = all_options.feedback_options
+
+            if (app_values['use_force_normalization'] and 
+                self.plugin.control_board.calibration and 
+                self.plugin.control_board.calibration._c_drop
+            ):
+                options.action.increase_voltage = (
+                    self.plugin.control_board.force_to_voltage(
+                        all_options.force + options.action.increase_force,
+                        all_options.frequency
+                    ) -
+                    self.plugin.control_board.force_to_voltage(
+                        all_options.force,
+                        all_options.frequency
+                    )
+                )
             self._set_gui_sensitive(options)
             self._update_gui_state(options)
 
+    def on_app_options_changed(self, plugin_name):
+        if self.plugin.name == plugin_name:
+            app = get_app()
+            app_values = self.plugin.get_app_values()
+            if (app_values['use_force_normalization'] and
+                self.plugin.control_board.calibration and 
+                self.plugin.control_board.calibration._c_drop
+            ):
+                self.builder.get_object("label_increase_voltage")\
+                    .set_text('Increase force by:')
+                self.builder.get_object("label_increase_voltage_units")\
+                    .set_text(u'\u03BCN/mm/repeat')
+            else:
+                self.builder.get_object("label_increase_voltage")\
+                    .set_text('Increase voltage by:')
+                self.builder.get_object("label_increase_voltage_units")\
+                    .set_text('V/repeat')
+            if app.protocol:
+                options = self.plugin.get_step_options().feedback_options
+                self._update_gui_state(options)
+
     def _update_gui_state(self, options):
+        app = get_app()
+        app_values = self.plugin.get_app_values()
+        
         # update the state of the "Feedback enabled" check button
         button = self.builder.get_object("button_feedback_enabled")
         if options.feedback_enabled != button.get_active():
@@ -424,8 +470,17 @@ class FeedbackOptionsController():
         if retry:
             self.builder.get_object("textentry_percent_threshold")\
                 .set_text(str(options.action.percent_threshold))
-            self.builder.get_object("textentry_increase_voltage")\
-                .set_text(str(options.action.increase_voltage))
+                
+            if (app_values['use_force_normalization'] and 
+                self.plugin.control_board.calibration and 
+                self.plugin.control_board.calibration._c_drop
+            ):
+                self.builder.get_object("textentry_increase_voltage")\
+                    .set_text(str(options.action.increase_force))
+            else:
+                self.builder.get_object("textentry_increase_voltage")\
+                    .set_text(str(options.action.increase_voltage))
+
             self.builder.get_object("textentry_max_repeats").set_text(
                 str(options.action.max_repeats))
         else:
@@ -662,10 +717,28 @@ class FeedbackOptionsController():
         Update the increase voltage value for the current step.
         """
         app = get_app()
+        app_values = self.plugin.get_app_values()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
-        options.action.increase_voltage = textentry_validate(
-            widget, options.action.increase_voltage, float)
+        if (app_values['use_force_normalization'] and 
+            self.plugin.control_board.calibration and 
+            self.plugin.control_board.calibration._c_drop
+        ):
+            options.action.increase_force = textentry_validate(
+                widget, options.action.increase_force, float)
+            options.action.increase_voltage = (
+                self.plugin.control_board.force_to_voltage(
+                    all_options.force + options.action.increase_force,
+                    all_options.frequency
+                ) -
+                self.plugin.control_board.force_to_voltage(
+                    all_options.force,
+                    all_options.frequency
+                )
+            )
+        else:
+            options.action.increase_voltage = textentry_validate(
+                widget, options.action.increase_voltage, float)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
                     interface=IPlugin)
