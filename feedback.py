@@ -1289,7 +1289,7 @@ class FeedbackResultsController():
                         self.export_data.append('time (ms):, ' +
                                                 ", ".join([str(x) for x in
                                                            results.time]))
-                        self.export_data.append('velocity (mm/s):,' +
+                        self.export_data.append('x-position (mm):,' +
                                                 ", ".join([str(x) for x in
                                                            x_pos]))
                     legend.append("Step %d (%.3f s)" % (row['core']["step"] +
