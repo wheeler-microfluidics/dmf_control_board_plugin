@@ -1252,17 +1252,20 @@ class FeedbackResultsController():
                             t, dxdt = results.dxdt(filter_order=3)
                             lines = self.axis.plot(t, dxdt * 1000)
                             handles.append(lines[0])
+                            
+                            # plot the unfiltered (raw) velocity in the same
+                            # color, but a lighter shade
                             c = matplotlib.colors.colorConverter.to_rgba(
                                 lines[0].get_c(), alpha=.2)
-                            t, dxdt = results.dxdt()
-                            self.axis.plot(t, dxdt * 1000, color=c)
+                            t, raw_dxdt = results.dxdt()
+                            self.axis.plot(t, raw_dxdt * 1000, color=c)
                         else:
                             t, dxdt = results.dxdt()
                             self.axis.plot(t, dxdt * 1000)
                         self.export_data.append('time (ms):, ' +
                                                 ", ".join([str(x) for x in t]))
                         self.export_data.append('velocity (mm/s):,' +
-                                                ", ".join([str(x) for x in
+                                                ", ".join([str(1e3 * x) for x in
                                                            dxdt]))
                     elif y_axis == "Voltage":
                         self.axis.plot(results.time[ind],
