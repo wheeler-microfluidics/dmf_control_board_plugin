@@ -1,3 +1,10 @@
+= Version 1.0.22 =
+ * Ignore voltage tolerance errors until protocol completes
+ * Allow batch editing of feedback options
+ * Fix csv export bugs
+ * Allow specifying retry action in terms of force/mm
+ * Fix error thrown when no control board is connected 
+
 = Version 1.0.17 =
  * Add force normalization option
  * Fix problem with updating configuration settings after "device load" calibration
