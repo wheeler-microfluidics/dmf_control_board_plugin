@@ -16,27 +16,24 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with dmf_control_board.  If not, see <http://www.gnu.org/licenses/>.
 """
-import os
+from copy import deepcopy
+import json
 import math
 import re
-from copy import deepcopy
 import warnings
 
-import tables
 from datetime import datetime
-from pygtkhelpers.ui.dialogs import info as info_dialog
-import yaml
-import gtk
-import gobject
-import numpy as np
-from path_helpers import path
+from dmf_control_board_firmware import (DMFControlBoard, FeedbackResultsSeries,
+                                        BadVGND)
+from feedback import (FeedbackOptions, FeedbackOptionsController,
+                      FeedbackCalibrationController, FeedbackResultsController,
+                      RetryAction, SweepFrequencyAction, SweepVoltageAction)
 from flatland import Integer, Boolean, Float, Form, Enum, String
-from flatland.validation import ValueAtLeast, ValueAtMost, Validator
-import microdrop_utility as utility
-from microdrop_utility.user_paths import home_dir
-from microdrop_utility.gui import yesno, FormViewDialog
-from microdrop.logger import logger
+from flatland.validation import ValueAtLeast, ValueAtMost
+from microdrop.app_context import get_app
+from microdrop.dmf_device import DeviceScaleNotSet
 from microdrop.gui.protocol_grid_controller import ProtocolGridController
+from microdrop.logger import logger
 from microdrop.plugin_helpers import (StepOptionsController, AppDataController,
                                       get_plugin_info)
 from microdrop.plugin_manager import (IPlugin, IWaveformGenerator, Plugin,
@@ -44,16 +41,22 @@ from microdrop.plugin_manager import (IPlugin, IWaveformGenerator, Plugin,
                                       ScheduleRequest, emit_signal,
                                       get_service_instance,
                                       get_service_instance_by_name)
-from microdrop.app_context import get_app
-from microdrop.dmf_device import DeviceScaleNotSet
-from dmf_control_board_firmware import (DMFControlBoard, FeedbackResultsSeries,
-                                        BadVGND)
-from feedback import (FeedbackOptions, FeedbackOptionsController,
-                      FeedbackCalibrationController,
-                      FeedbackResultsController, RetryAction,
-                      SweepFrequencyAction, SweepVoltageAction)
-from serial_device import SerialDevice, get_serial_ports
+from microdrop_utility.gui import yesno, FormViewDialog
 from nested_structures import apply_depth_first, apply_dict_depth_first
+from path_helpers import path
+from pygtkhelpers.ui.dialogs import info as info_dialog
+from serial_device import get_serial_ports
+from zmq_plugin.plugin import Plugin as ZmqPlugin
+from zmq_plugin.schema import decode_content_data
+import gobject
+import gtk
+import microdrop_utility as utility
+import numpy as np
+import pandas as pd
+import tables
+import yaml
+import zmq
+
 from .wizards import MicrodropChannelsAssistantView
 
 
@@ -65,9 +68,57 @@ warnings.simplefilter('ignore', tables.NaturalNameWarning)
 PluginGlobals.push_env('microdrop.managed')
 
 
+class DmfZmqPlugin(ZmqPlugin):
+    '''
+    API for adding/clearing droplet routes.
+    '''
+    def __init__(self, parent, *args, **kwargs):
+        self.parent = parent
+        super(DmfZmqPlugin, self).__init__(*args, **kwargs)
+
+    def check_sockets(self):
+        '''
+        Check for messages on command and subscription sockets and process
+        any messages accordingly.
+        '''
+        try:
+            msg_frames = self.command_socket.recv_multipart(zmq.NOBLOCK)
+        except zmq.Again:
+            pass
+        else:
+            self.on_command_recv(msg_frames)
+
+        try:
+            msg_frames = self.subscribe_socket.recv_multipart(zmq.NOBLOCK)
+            source, target, msg_type, msg_json = msg_frames
+            if ((source == 'wheelerlab.electrode_controller_plugin') and
+                (msg_type == 'execute_reply')):
+                # The 'wheelerlab.electrode_controller_plugin' plugin maintains
+                # the requested state of each electrode.
+                msg = json.loads(msg_json)
+                if msg['content']['command'] in ('set_electrode_state',
+                                                 'set_electrode_states'):
+                    data = decode_content_data(msg)
+                    self.parent.actuated_area = data['actuated_area']
+                    self.parent.update_channel_states(data['channel_states'])
+                elif msg['content']['command'] == 'get_channel_states':
+                    data = decode_content_data(msg)
+                    self.parent.actuated_area = data['actuated_area']
+                    self.parent.channel_states = data['channel_states']
+            else:
+                print '[check_sockets]', source, target, msg_type
+                self.most_recent = msg_json
+        except zmq.Again:
+            pass
+        except:
+            logger.error('Error processing message from subscription '
+                            'socket.', exc_info=True)
+        return True
+
+
 class DMFControlBoardOptions(object):
     _default_force = 25.0
-    
+
     def __init__(self, duration=100, voltage=100.0, frequency=10e3,
                  feedback_options=None, force=None):
         self.duration = duration
@@ -148,6 +199,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         default_port_ = None
 
     AppFields = Form.of(
+        String.named('hub_uri').using(optional=True,
+                                      default='tcp://localhost:31000'),
         Integer.named('sampling_window_ms').using(default=5, optional=True,
                                                 validators=
                                                 [ValueAtLeast(minimum=0), ],),
@@ -224,8 +277,39 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                'Edit settings',
                                'Load from file',
                                'Save to file'])]
+        self.actuated_area = 0
+        self.channel_states = pd.Series()
+        self.plugin = None
+        self.plugin_timeout_id = None
+
+    def update_channel_states(self, channel_states):
+        # TODO Ideally, this should trigger the hardware to *actually* update
+        # the state of the corresponding channel switches.
+
+        # Update locally cached channel states with new modified states.
+        self.channel_states = channel_states.combine_first(self
+                                                           .channel_states)
+
+    def cleanup_plugin(self):
+        if self.plugin_timeout_id is not None:
+            gobject.source_remove(self.plugin_timeout_id)
+        if self.plugin is not None:
+            self.plugin = None
 
     def on_plugin_enable(self):
+        super(DMFControlBoardPlugin, self).on_plugin_enable()
+        app = get_app()
+        app_values = self.get_app_values()
+
+        self.cleanup_plugin()
+        self.plugin = DmfZmqPlugin(self, self.name, app_values['hub_uri'])
+        # Initialize sockets.
+        self.plugin.reset()
+
+        # Periodically process outstanding message received on plugin sockets.
+        self.plugin_timeout_id = gobject.timeout_add(10,
+                                                     self.plugin.check_sockets)
+
         if not self.initialized:
             self.feedback_options_controller = FeedbackOptionsController(self)
             self.feedback_results_controller = FeedbackResultsController(self)
@@ -344,7 +428,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             self.initialized = True
 
-        super(DMFControlBoardPlugin, self).on_plugin_enable()
         self.check_device_name_and_version()
         self.control_board_menu_item.show()
         self.edit_log_calibration_menu_item.show()
@@ -354,6 +437,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             self._update_protocol_grid()
 
     def on_plugin_disable(self):
+        self.cleanup_plugin()
         self.feedback_options_controller.on_plugin_disable()
         self.control_board_menu_item.hide()
         self.edit_log_calibration_menu_item.hide()
@@ -363,9 +447,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             self.on_step_run()
             self._update_protocol_grid()
 
+    def on_app_exit(self):
+        """
+        Handler called just before the Microdrop application exits.
+        """
+        self.cleanup_plugin()
+
     def on_protocol_swapped(self, old_protocol, protocol):
         self._update_protocol_grid()
-        
+
     def _update_protocol_grid(self):
         app = get_app()
         app_values = self.get_app_values()
@@ -378,7 +468,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     if 'force' not in pgc.enabled_fields[self.name]:
                         pgc.enabled_fields[self.name].add('force')
 
-                    if (app.protocol and self.control_board.calibration and 
+                    if (app.protocol and self.control_board.calibration and
                         self.control_board.calibration._c_drop
                     ):
                         for i, step in enumerate(app.protocol):
@@ -392,7 +482,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         pgc.enabled_fields[self.name].remove('force')
                     if 'voltage' not in pgc.enabled_fields[self.name]:
                         pgc.enabled_fields[self.name].add('voltage')
-                        
+
                 pgc.update_grid()
 
     def on_app_options_changed(self, plugin_name):
@@ -435,7 +525,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             if reconnect:
                 self.connect()
-                
+
             self._update_protocol_grid()
         elif plugin_name == app.name:
             # Turn off all electrodes if we're not in realtime mode and not
@@ -444,12 +534,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 not app.running):
                 logger.info('Turning off all electrodes.')
                 self.control_board.set_state_of_all_channels(
-                    np.zeros(self.control_board.number_of_channels())
-                )
+                    np.zeros(self.control_board.number_of_channels()))
         if self.feedback_options_controller:
-            self.feedback_options_controller\
-                .on_app_options_changed(plugin_name)
-
+            (self.feedback_options_controller
+             .on_app_options_changed(plugin_name))
 
     def connect(self):
         '''
@@ -883,19 +971,18 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app = get_app()
         label = (self.connection_status + ', Voltage: %.1f V' %
                  results.V_actuation()[-1])
-        
-        # add normalized force to the label if we've calibrated the device 
+
+        # add normalized force to the label if we've calibrated the device
         if results.calibration._c_drop:
             label += (u'\nForce: %.1f \u03BCN/mm (c<sub>device</sub>='
-                      '%.1f pF/mm<sup>2</sup>)' % 
+                      '%.1f pF/mm<sup>2</sup>)' %
                       (np.mean(1e6 * results.force(Ly=1.0)),
                       1e12*results.calibration.c_drop(results.frequency)))
 
         app.main_window_controller.label_control_board_status\
            .set_markup(label)
-        
+
         options = self.get_step_options()
-        feedback_options = options.feedback_options
 
         voltage = results.voltage
         logger.info('[DMFControlBoardPlugin]'
@@ -944,26 +1031,20 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         self.control_board.amplifier_gain)
 
     def get_actuated_area(self):
-        app = get_app()
-        return app.dmf_device.actuated_area(
-            app.dmf_device_controller.get_step_options().state_of_channels)
+        return self.actuated_area
 
     def on_step_run(self):
         """
         Handler called whenever a step is executed.
 
-        Plugins that handle this signal must emit the on_step_complete
-        signal once they have completed the step. The protocol controller
-        will wait until all plugins have completed the current step before
-        proceeding.
+        Plugins that handle this signal must emit the on_step_complete signal
+        once they have completed the step. The protocol controller will wait
+        until all plugins have completed the current step before proceeding.
         """
         logger.debug('[DMFControlBoardPlugin] on_step_run()')
         self._kill_running_step()
         app = get_app()
         options = self.get_step_options()
-        dmf_options = app.dmf_device_controller.get_step_options()
-        logger.debug('[DMFControlBoardPlugin] options=%s dmf_options=%s' %
-                     (options, dmf_options))
         feedback_options = options.feedback_options
         app_values = self.get_app_values()
 
@@ -981,30 +1062,23 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                 interface=IWaveformGenerator)
                     self.check_impedance(options)
 
-                state = dmf_options.state_of_channels
                 max_channels = self.control_board.number_of_channels()
-                if len(state) > max_channels:
-                    state = state[0:max_channels]
-                elif len(state) < max_channels:
-                    state = np.concatenate([state, np.zeros(max_channels -
-                                                            len(state), int)])
-                else:
-                    assert(len(state) == max_channels)
+                # All channels should default to off.
+                channel_states = np.zeros(max_channels, dtype=int)
+                # Set the state of any channels that have been set explicitly.
+                channel_states[self.channel_states.index] = self.channel_states
 
                 if feedback_options.feedback_enabled:
-                    # calculate the total area of actuated electrodes
-                    area = self.get_actuated_area()
-
                     if feedback_options.action.__class__ == RetryAction:
                         attempt = app.protocol.current_step_attempt
                         if attempt <= feedback_options.action.max_repeats:
                             frequency = options.frequency
-                            if (app_values['use_force_normalization'] and 
-                                self.control_board.calibration and 
+                            if (app_values['use_force_normalization'] and
+                                self.control_board.calibration and
                                 self.control_board.calibration._c_drop
                             ):
                                 voltage = self.control_board.force_to_voltage(
-                                    options.force + 
+                                    options.force +
                                     feedback_options.action.increase_force *
                                     attempt,
                                     options.frequency
@@ -1028,7 +1102,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                 app_values['delay_between_windows_ms'],
                                 app_values['interleave_feedback_samples'],
                                 app_values['use_rms'],
-                                state)
+                                channel_states)
                             logger.debug('[DMFControlBoardPlugin] on_step_run:'
                                          ' timeout_add(%d, '
                                          '_callback_retry_action_completed)' %
@@ -1053,7 +1127,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         test_options = deepcopy(options)
                         self._callback_sweep_frequency(test_options,
                                                        results,
-                                                       state,
+                                                       channel_states,
                                                        frequencies,
                                                        first_call=True)
                         return
@@ -1076,7 +1150,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         test_options = deepcopy(options)
                         self._callback_sweep_voltage(test_options,
                                                      results,
-                                                     state,
+                                                     channel_states,
                                                      voltages,
                                                      first_call=True)
                         return
@@ -1087,15 +1161,14 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     emit_signal("set_voltage", options.voltage,
                                 interface=IWaveformGenerator)
                     self.check_impedance(options)
-                    self.control_board.state_of_all_channels = state
+                    self.control_board.state_of_all_channels = channel_states
             # Turn off all electrodes if we're not in realtime mode and not
             # running a protocol.
             elif (self.control_board.connected() and not app.realtime_mode and
                   not app.running):
                 logger.info('Turning off all electrodes.')
                 self.control_board.set_state_of_all_channels(
-                    np.zeros(self.control_board.number_of_channels())
-                )
+                    np.zeros(self.control_board.number_of_channels()))
 
             # if a protocol is running, wait for the specified minimum duration
             if app.running:
@@ -1143,7 +1216,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         logger.debug('[DMFControlBoardPlugin] '
                      '_callback_retry_action_completed')
         app = get_app()
-        app_values = self.get_app_values()
         area = self.get_actuated_area()
         return_value = None
         results = self.get_impedance_data()
@@ -1341,7 +1413,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         test_options.duration = app_values['sampling_window_ms'] * 5
         test_options.feedback_options = FeedbackOptions(
             feedback_enabled=True, action=RetryAction())
-        state = np.zeros(self.control_board.number_of_channels())
         delay_between_windows_ms = 0
         results = \
             self.measure_impedance(
@@ -1352,7 +1423,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 delay_between_windows_ms,
                 app_values['interleave_feedback_samples'],
                 app_values['use_rms'],
-                state)
+                np.zeros(self.control_board.number_of_channels(), dtype=int))
         emit_signal("on_device_impedance_update", results)
         return results
 
@@ -1493,20 +1564,19 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app = get_app()
         app_values = self.get_app_values()
         options = self.get_step_options(step_number)
-        if (app_values['use_force_normalization'] and 
-            self.control_board.calibration and 
-            self.control_board.calibration._c_drop
-        ):
+        if app_values['use_force_normalization'] and (self.control_board
+                                                      .calibration and
+                                                      self.control_board
+                                                      .calibration._c_drop):
             options.voltage = self.control_board.force_to_voltage(
                 options.force,
-                options.frequency
-            )
+                options.frequency)
         if self.feedback_options_controller:
-            self.feedback_options_controller\
-                .on_step_options_changed(plugin, step_number)
-        if (app.protocol and not app.running and not app.realtime_mode and
-            (plugin == 'microdrop.gui.dmf_device_controller' or plugin ==
-             self.name) and app.protocol.current_step_number == step_number):
+            (self.feedback_options_controller
+             .on_step_options_changed(plugin, step_number))
+        if app.protocol and (not app.running and not app.realtime_mode and
+                             app.protocol.current_step_number == step_number
+                             and plugin == self.name):
             self.on_step_run()
 
     def on_step_swapped(self, original_step_number, new_step_number):
@@ -1547,17 +1617,21 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Returns a list of scheduling requests (i.e., ScheduleRequest
         instances) for the function specified by function_name.
         """
-        if function_name in ['on_step_options_changed']:
+        if function_name == 'on_step_swapped':
+            return [ScheduleRequest('wheelerlab.electrode_controller_plugin',
+                                    self.name)]
+        elif function_name in ['on_step_options_changed']:
             return [ScheduleRequest(self.name,
                                     'microdrop.gui.protocol_grid_controller'),
                     ScheduleRequest(self.name,
-                                    'microdrop.gui.protocol_controller'),
-                    ]
+                                    'microdrop.gui.protocol_controller')]
         elif function_name == 'on_app_options_changed':
             return [ScheduleRequest('microdrop.app', self.name)]
         elif function_name == 'on_protocol_swapped':
             return [ScheduleRequest('microdrop.gui.protocol_grid_controller',
                                     self.name)]
+        elif function_name == 'on_plugin_enable':
+            return [ScheduleRequest('wheelerlab.zmq_hub_plugin', self.name)]
         return []
 
     def configurations_dir(self):

@@ -266,26 +266,25 @@ class FeedbackOptionsController():
             self.feedback_options_menu_item.set_sensitive(
                 app.dmf_device is not None)
 
-            self.measure_cap_filler_menu_item = gtk.MenuItem("Measure "
-                                                             "capacitance of "
-                                                             "filler media")
-            app.dmf_device_controller.view.popup.add_item(
-                self.measure_cap_filler_menu_item)
-            self.measure_cap_filler_menu_item.connect("activate",
-                                                      self
-                                                      .on_measure_cap_filler)
-            self.measure_cap_liquid_menu_item = gtk.MenuItem("Measure "
-                                                             "capacitance of "
-                                                             "liquid")
-            app.dmf_device_controller.view.popup.add_item(
-                self.measure_cap_liquid_menu_item)
-            self.measure_cap_liquid_menu_item.connect("activate",
-                                                      self
-                                                      .on_measure_cap_liquid)
-
+            #self.measure_cap_filler_menu_item = gtk.MenuItem("Measure "
+                                                             #"capacitance of "
+                                                             #"filler media")
+            #app.dmf_device_controller.view.popup.add_item(
+                #self.measure_cap_filler_menu_item)
+            #self.measure_cap_filler_menu_item.connect("activate",
+                                                      #self
+                                                      #.on_measure_cap_filler)
+            #self.measure_cap_liquid_menu_item = gtk.MenuItem("Measure "
+                                                             #"capacitance of "
+                                                             #"liquid")
+            #app.dmf_device_controller.view.popup.add_item(
+                #self.measure_cap_liquid_menu_item)
+            #self.measure_cap_liquid_menu_item.connect("activate",
+                                                      #self
+                                                      #.on_measure_cap_liquid)
             self.initialized = True
-        self.measure_cap_filler_menu_item.show()
-        self.measure_cap_liquid_menu_item.show()
+        #self.measure_cap_filler_menu_item.show()
+        #self.measure_cap_liquid_menu_item.show()
 
     def on_plugin_disable(self):
         self.measure_cap_filler_menu_item.hide()
@@ -309,12 +308,12 @@ class FeedbackOptionsController():
         return True
 
     def on_measure_cap_filler(self, widget, data=None):
-        c = self.measure_device_capacitance() 
+        c = self.measure_device_capacitance()
         self.plugin.control_board.calibration._c_filler = c
         self.plugin.set_app_values(dict(c_filler=yaml.dump(c)))
 
     def on_measure_cap_liquid(self, widget, data=None):
-        c = self.measure_device_capacitance() 
+        c = self.measure_device_capacitance()
         self.plugin.control_board.calibration._c_drop = c
         self.plugin.set_app_values(dict(c_drop=yaml.dump(c)))
 
@@ -330,14 +329,11 @@ class FeedbackOptionsController():
         step = app.protocol.current_step()
         dmf_options = step.get_data(self.plugin.name)
 
-        # get the current state of channels
-        state = app.dmf_device_controller.get_step_options().state_of_channels
-        n_channels = self.plugin.control_board.number_of_channels()
-        
-        # pad state with zeros if necessary
-        if len(state) < n_channels:
-            state = np.pad(state, (0, n_channels - len(state)),
-                           'constant', constant_values=(0,0))
+        max_channels = self.control_board.number_of_channels()
+        # All channels should default to off.
+        channel_states = np.zeros(max_channels, dtype=int)
+        # Set the state of any channels that have been set explicitly.
+        channel_states[self.channel_states.index] = self.channel_states
 
         voltage = dmf_options.voltage
         emit_signal("set_voltage", voltage, interface=IWaveformGenerator)
@@ -364,7 +360,7 @@ class FeedbackOptionsController():
                 app_values['delay_between_windows_ms'],
                 app_values['interleave_feedback_samples'],
                 app_values['use_rms'],
-                state)
+                channel_states)
             results.add_data(frequency, data)
             results.area = area
             capacitance = np.mean(results.capacitance())
@@ -384,12 +380,11 @@ class FeedbackOptionsController():
         # turn off all electrodes if we're not in realtime mode
         if not app.realtime_mode:
             self.plugin.control_board.set_state_of_all_channels(
-                np.zeros(self.plugin.control_board.number_of_channels())
-            )
+                np.zeros(max_channels, dtype=int))
 
         return dict(frequency=results.frequency.tolist(),
-                    capacitance=(np.mean(results.capacitance(), 1) / area). \
-                        tolist())
+                    capacitance=(np.mean(results.capacitance(), 1) / area)
+                    .tolist())
 
     def on_button_feedback_enabled_toggled(self, widget, data=None):
         """
@@ -1177,11 +1172,16 @@ class FeedbackResultsController():
                 if (self.plugin.name in row.keys() and "FeedbackResults" in
                         row[self.plugin.name].keys()):
                     results = row[self.plugin.name]["FeedbackResults"]
-                    state_of_channels = protocol[row['core']["step"]]. \
-                        get_data('microdrop.gui.dmf_device_controller'). \
-                        state_of_channels
-                    area = dmf_device.actuated_area(state_of_channels)
-                    results.area = area
+                    # Extract electrode states from protocol step.
+                    electrode_states = (protocol[row['core']["step"]]
+                                        .get_data('wheelerlab.'
+                                                  'electrode_controller'
+                                                  '_plugin')
+                                        ['electrode_states'])
+                    # Compute area of actuated electrodes.
+                    results.area =\
+                        dmf_device.get_actuated_electrodes_area(
+                            electrode_states)
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
@@ -1195,7 +1195,7 @@ class FeedbackResultsController():
                     self.export_data.append('step time (s):, %f' %
                                             (row['core']["time"]))
 
-                    # only plot values that have a valid fb and hv resistor,
+                    # Only plot values that have a valid fb and hv resistor,
                     # and that have been using the same fb and hv resistor for
                     # > 1 consecutive measurement
                     ind = mlab.find(np.logical_and(
@@ -1309,10 +1309,14 @@ class FeedbackResultsController():
                     if results.xlabel != "Frequency":
                         continue
 
-                    state_of_channels = protocol[row['core']["step"]]. \
-                        get_data('microdrop.gui.dmf_device_controller'). \
-                        state_of_channels
-                    area = dmf_device.actuated_area(state_of_channels)
+                    electrode_states = (protocol[row['core']["step"]]
+                                        .get_data('wheelerlab.'
+                                                  'electrode_controller'
+                                                  '_plugin')
+                                        ['electrode_states'])
+                    results.area =\
+                        dmf_device.get_actuated_electrodes_area(
+                            electrode_states)
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
@@ -1390,10 +1394,14 @@ class FeedbackResultsController():
                     if results.xlabel != "Voltage":
                         continue
 
-                    state_of_channels = protocol[row['core']["step"]]. \
-                        get_data('microdrop.gui.dmf_device_controller'). \
-                        state_of_channels
-                    area = dmf_device.actuated_area(state_of_channels)
+                    electrode_states = (protocol[row['core']["step"]]
+                                        .get_data('wheelerlab.'
+                                                  'electrode_controller'
+                                                  '_plugin')
+                                        ['electrode_states'])
+                    results.area =\
+                        dmf_device.get_actuated_electrodes_area(
+                            electrode_states)
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
