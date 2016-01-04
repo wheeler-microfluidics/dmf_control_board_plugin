@@ -106,7 +106,6 @@ class DmfZmqPlugin(ZmqPlugin):
                     self.parent.actuated_area = data['actuated_area']
                     self.parent.channel_states = data['channel_states']
             else:
-                print '[check_sockets]', source, target, msg_type
                 self.most_recent = msg_json
         except zmq.Again:
             pass
