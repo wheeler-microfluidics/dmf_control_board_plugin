@@ -287,8 +287,9 @@ class FeedbackOptionsController():
         #self.measure_cap_liquid_menu_item.show()
 
     def on_plugin_disable(self):
-        self.measure_cap_filler_menu_item.hide()
-        self.measure_cap_liquid_menu_item.hide()
+        #self.measure_cap_filler_menu_item.hide()
+        #self.measure_cap_liquid_menu_item.hide()
+        pass
 
     def on_window_show(self, widget, data=None):
         """
