@@ -30,7 +30,7 @@ from feedback import (FeedbackOptions, FeedbackOptionsController,
                       RetryAction, SweepFrequencyAction, SweepVoltageAction)
 from flatland import Integer, Boolean, Float, Form, Enum, String
 from flatland.validation import ValueAtLeast, ValueAtMost
-from microdrop.app_context import get_app
+from microdrop.app_context import get_app, get_hub_uri
 from microdrop.dmf_device import DeviceScaleNotSet
 from microdrop.gui.protocol_grid_controller import ProtocolGridController
 from microdrop.logger import logger
@@ -198,8 +198,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         default_port_ = None
 
     AppFields = Form.of(
-        String.named('hub_uri').using(optional=True,
-                                      default='tcp://localhost:31000'),
         Integer.named('sampling_window_ms').using(default=5, optional=True,
                                                 validators=
                                                 [ValueAtLeast(minimum=0), ],),
@@ -301,7 +299,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app_values = self.get_app_values()
 
         self.cleanup_plugin()
-        self.plugin = DmfZmqPlugin(self, self.name, app_values['hub_uri'])
+        self.plugin = DmfZmqPlugin(self, self.name, get_hub_uri())
         # Initialize sockets.
         self.plugin.reset()
 
