@@ -1627,8 +1627,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         elif function_name == 'on_protocol_swapped':
             return [ScheduleRequest('microdrop.gui.protocol_grid_controller',
                                     self.name)]
-        elif function_name == 'on_plugin_enable':
-            return [ScheduleRequest('wheelerlab.zmq_hub_plugin', self.name)]
         return []
 
     def configurations_dir(self):
