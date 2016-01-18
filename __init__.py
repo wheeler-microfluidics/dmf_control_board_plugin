@@ -477,9 +477,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     if 'force' not in pgc.enabled_fields[self.name]:
                         pgc.enabled_fields[self.name].add('force')
 
-                    if (app.protocol and self.control_board.calibration and
-                        self.control_board.calibration._c_drop
-                    ):
+                    if app.protocol and (self.control_board.calibration is not
+                                         None and self.control_board
+                                         .calibration._c_drop):
                         for i, step in enumerate(app.protocol):
                             options = self.get_step_options(i)
                             options.voltage = self.control_board.force_to_voltage(
@@ -1571,11 +1571,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     def on_step_options_changed(self, plugin, step_number):
         app = get_app()
         app_values = self.get_app_values()
-        options = self.get_step_options(step_number)
-        if app_values['use_force_normalization'] and (self.control_board
-                                                      .calibration and
-                                                      self.control_board
-                                                      .calibration._c_drop):
+        options = self.get_step_options()
+        if (app_values['use_force_normalization'] and
+            self.control_board.calibration is not None and
+            self.control_board.calibration._c_drop):
             options.voltage = self.control_board.force_to_voltage(
                 options.force,
                 options.frequency)
