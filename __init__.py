@@ -102,14 +102,12 @@ class DmfZmqPlugin(ZmqPlugin):
                                                  'set_electrode_states'):
                     data = decode_content_data(msg)
                     self.parent.actuated_area = data['actuated_area']
-                    logger.info('Update channel states from 0MQ plugin.')
                     self.parent.update_channel_states(data['channel_states'])
                 elif msg['content']['command'] == 'get_channel_states':
                     data = decode_content_data(msg)
                     self.parent.actuated_area = data['actuated_area']
                     self.parent.channel_states = self.parent.channel_states.iloc[0:0]
                     self.parent.update_channel_states(data['channel_states'])
-                    logger.info('Set channel states from 0MQ plugin.')
             else:
                 self.most_recent = msg_json
         except zmq.Again:
@@ -285,14 +283,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.plugin_timeout_id = None
 
     def update_channel_states(self, channel_states):
-        # TODO Ideally, this should trigger the hardware to *actually* update
-        # the state of the corresponding channel switches.
-
         # Update locally cached channel states with new modified states.
-        logger.info('[update_channel_states]')
         try:
             self.channel_states = channel_states.combine_first(self
-															   .channel_states)
+                                                               .channel_states)
         except ValueError:
             logging.info('channel_states: %s', channel_states)
             logging.info('self.channel_states: %s', self.channel_states)
@@ -300,7 +294,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         else:
             app = get_app()
             if self.control_board.connected() and (app.realtime_mode or
-												   app.running):
+                                                   app.running):
                 self.on_step_run()
 
     def cleanup_plugin(self):
@@ -313,9 +307,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         logger.info('on_plugin_enable')
         super(DMFControlBoardPlugin, self).on_plugin_enable()
         app = get_app()
-        app_values = self.get_app_values()
 
         self.cleanup_plugin()
+        # Initialize 0MQ hub plugin and subscribe to hub messages.
         self.plugin = DmfZmqPlugin(self, self.name, get_hub_uri(),
                                    subscribe_options={zmq.SUBSCRIBE: ''})
         # Initialize sockets.
@@ -402,8 +396,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 '''
                 view = MicrodropChannelsAssistantView(self.control_board)
                 def on_close(*args):
-                    view.to_hdf(self.calibrations_dir().joinpath('[%05d]-channels.h5' %
-                        self.control_board.serial_number))
+                    view.to_hdf(self.calibrations_dir()
+                                .joinpath('[%05d]-channels.h5' %
+                                          self.control_board.serial_number))
                 view.widget.connect('close', on_close)
                 view.show()
 
@@ -544,8 +539,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         elif plugin_name == app.name:
             # Turn off all electrodes if we're not in realtime mode and not
             # running a protocol.
-            if (self.control_board.connected() and not app.realtime_mode and
-                not app.running):
+            if self.control_board.connected() and (not app.realtime_mode and
+                                                   not app.running):
                 logger.info('Turning off all electrodes.')
                 self.control_board.set_state_of_all_channels(
                     np.zeros(self.control_board.number_of_channels()))
@@ -1574,8 +1569,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             return getattr(options.feedback_options, name)
 
     def on_step_options_changed(self, plugin, step_number):
-        logger.info('[DMFControlBoardPlugin] on_step_options_changed(): %s '
-                    'step #%d' % (plugin, step_number))
         app = get_app()
         app_values = self.get_app_values()
         options = self.get_step_options(step_number)
@@ -1593,10 +1586,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                              app.protocol.current_step_number == step_number
                              and plugin in
 							 (self.name, )):
-                              #'wheelerlab.electrode_controller_plugin')):
-            logger.info('[DMFControlBoardPlugin] Run step')
             self.on_step_run()
-        logger.info('[DMFControlBoardPlugin] on_step_options_changed() DONE')
 
     def on_step_swapped(self, original_step_number, new_step_number):
         logger.debug('[DMFControlBoardPlugin] on_step_swapped():'
