@@ -984,12 +984,11 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         # add normalized force to the label if we've calibrated the device
         if results.calibration._c_drop:
             label += (u'\nForce: %.1f \u03BCN/mm (c<sub>device</sub>='
-                      '%.1f pF/mm<sup>2</sup>)' %
+                      u'%.1f pF/mm<sup>2</sup>)' %
                       (np.mean(1e6 * results.force(Ly=1.0)),
                       1e12*results.calibration.c_drop(results.frequency)))
 
-        app.main_window_controller.label_control_board_status\
-           .set_markup(label)
+        app.main_window_controller.label_control_board_status.set_markup(label)
 
         options = self.get_step_options()
 
@@ -1007,13 +1006,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             # if the signal is less than the voltage tolerance
             if results.V_actuation()[-1] < self.control_board.voltage_tolerance:
-                if app.running:
-                    self._voltage_tolerance_error_flag = True
-                    logger.info('Low voltage detected.')
-                else:
-                    logger.error("Low voltage detected. Please check that the "
-                                 "amplifier is on.")
-                    return
+                error_msg = ("Low voltage detected. Please check that the "
+                             "amplifier is on.")
+                logger.error(error_msg)
+                raise ValueError(error_msg, 'low-voltage')
 
             # allow maximum of 5 adjustment attempts
             if (self.control_board.auto_adjust_amplifier_gain and
@@ -1023,8 +1019,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             self.n_voltage_adjustments)
                 emit_signal("set_voltage", voltage,
                             interface=IWaveformGenerator)
-                self.check_impedance(options, self.n_voltage_adjustments +
-                                     1)
+                self.check_impedance(options, self.n_voltage_adjustments + 1)
             else:
                 self.n_voltage_adjustments = None
                 if app.running:
@@ -1251,7 +1246,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         (app.protocol.current_step_number,
                          app.protocol.current_step_attempt,
                          np.max(normalized_capacitance)))
-            emit_signal("on_device_impedance_update", results)
+            try:
+                emit_signal("on_device_impedance_update", results)
+            except ValueError, exception:
+                if exception.args[-1] == 'low-voltage':
+                    # Low voltage was detected so stop protocol.
+                    self.step_complete('Fail')
         self.step_complete(return_value)
         return False  # Stop the timeout from refiring
 
@@ -1434,7 +1434,13 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 app_values['interleave_feedback_samples'],
                 app_values['use_rms'],
                 np.zeros(self.control_board.number_of_channels(), dtype=int))
-        emit_signal("on_device_impedance_update", results)
+        try:
+            emit_signal("on_device_impedance_update", results)
+        except ValueError, exception:
+            app = get_app()
+            if app.running and exception.args[-1] == 'low-voltage':
+                # Low voltage was detected so stop protocol.
+                self.step_complete('Fail')
         return results
 
     def _check_n_sampling_windows(self,
