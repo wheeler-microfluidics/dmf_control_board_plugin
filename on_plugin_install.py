@@ -17,5 +17,7 @@ if __name__ == '__main__':
         print install(['--find-links', 'http://192.99.4.95/wheels',
                        '--trusted-host', '192.99.4.95', '-r',
                        requirements_file])
+        print ('[%s] Completed post-install processing for: %s' %
+               (str(datetime.now()), plugin_root.name))
         print 'Press <Enter> key to continue...'
         raw_input()
