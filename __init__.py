@@ -1,5 +1,5 @@
 """
-Copyright 2011 Ryan Fobel
+Copyright 2011-2016 Ryan Fobel and Christian Fobel
 
 This file is part of dmf_control_board.
 
@@ -26,8 +26,7 @@ import warnings
 from datetime import datetime
 from dmf_control_board_firmware import (DMFControlBoard, FeedbackResultsSeries,
                                         BadVGND,
-                                        feedback_results_to_impedance_frame,
-                                        feedback_results_to_measurements_frame)
+                                        feedback_results_to_impedance_frame)
 from feedback import (FeedbackOptions, FeedbackOptionsController,
                       FeedbackCalibrationController, FeedbackResultsController,
                       RetryAction, SweepFrequencyAction, SweepVoltageAction)
@@ -78,6 +77,7 @@ class DmfZmqPlugin(ZmqPlugin):
     '''
     def __init__(self, parent, *args, **kwargs):
         self.parent = parent
+        self._electrode_commands_registered = 0
         super(DmfZmqPlugin, self).__init__(*args, **kwargs)
 
     def check_sockets(self):
@@ -108,15 +108,31 @@ class DmfZmqPlugin(ZmqPlugin):
                 elif msg['content']['command'] == 'get_channel_states':
                     data = decode_content_data(msg)
                     self.parent.actuated_area = data['actuated_area']
-                    self.parent.channel_states = self.parent.channel_states.iloc[0:0]
+                    self.parent.channel_states = \
+                        self.parent.channel_states.iloc[0:0]
                     self.parent.update_channel_states(data['channel_states'])
+            elif (self._electrode_commands_registered < 2 and
+                  (source == 'wheelerlab.dmf_device_ui_plugin')):
+                # Register electrode commands with device UI plugin.
+                logger.info('Register electrode commands with device UI '
+                            'plugin.')
+                for title, command in (('Measure capacitance of liquid',
+                                        'measure_cap_liquid'),
+                                       ('Measure capacitance of filler media',
+                                        'measure_cap_filler')):
+                    def on_registered(reply):
+                        self._electrode_commands_registered += 1
+                    self.execute_async('wheelerlab.dmf_device_ui_plugin',
+                                       'register_electrode_command',
+                                       extra_kwargs={'command': command},
+                                       title=title, callback=on_registered)
             else:
                 self.most_recent = msg_json
         except zmq.Again:
             pass
         except:
             logger.error('Error processing message from subscription '
-                            'socket.', exc_info=True)
+                         'socket.', exc_info=True)
         return True
 
     def on_execute__channel_count(self, request):
@@ -167,6 +183,22 @@ class DmfZmqPlugin(ZmqPlugin):
                 control_board.set_waveform_voltage(start_voltage)
             if 'frequency' in data:
                 control_board.set_waveform_frequency(start_frequency)
+
+    def on_execute__measure_cap_filler(self, request):
+        '''
+        Measure capacitance of actuated electrodes as filler (e.g., air, oil).
+        '''
+        c = self.parent.feedback_options_controller.measure_cap_filler()
+        logger.info('[measure_cap_filler] c=%s', c)
+        return c
+
+    def on_execute__measure_cap_liquid(self, request):
+        '''
+        Measure capacitance of actuated electrodes as liquid (i.e., droplet).
+        '''
+        c = self.parent.feedback_options_controller.measure_cap_liquid()
+        logger.info('[measure_cap_liquid] c=%s', c)
+        return c
 
 
 class DMFControlBoardOptions(object):
@@ -552,27 +584,26 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             reconnect = False
 
             if self.control_board.connected():
-                if 'c_drop' in app_values and \
-                    self.control_board.calibration._c_drop is None:
-                        c_drop = yaml.load(app_values['c_drop'])
-                        if c_drop is not None and len(c_drop):
-                            response = yesno(
-                                "Use cached value for c<sub>drop</sub>?")
-                            if response == gtk.RESPONSE_YES:
-                                self.control_board.calibration._c_drop = c_drop
-                            else:
-                                self.set_app_values(dict(c_drop=""))
-                if 'c_filler' in app_values and \
-                    self.control_board.calibration._c_filler is None:
-                        c_filler = yaml.load(app_values['c_filler'])
-                        if c_filler is not None and len(c_filler):
-                            response = yesno(
-                                "Use cached value for c<sub>filler</sub>?")
-                            if response == gtk.RESPONSE_YES:
-                                self.control_board.calibration._c_filler = \
-                                    c_filler
-                            else:
-                                self.set_app_values(dict(c_filler=""))
+                if 'c_drop' in app_values and (self.control_board.calibration
+                                               ._c_drop is None):
+                    c_drop = yaml.load(app_values['c_drop'])
+                    if c_drop is not None and len(c_drop):
+                        response = yesno('Use cached value for'
+                                         'c<sub>drop</sub>?')
+                        if response == gtk.RESPONSE_YES:
+                            self.control_board.calibration._c_drop = c_drop
+                        else:
+                            self.set_app_values(dict(c_drop=''))
+                if 'c_filler' in app_values and (self.control_board.calibration
+                                                 ._c_filler is None):
+                    c_filler = yaml.load(app_values['c_filler'])
+                    if c_filler is not None and len(c_filler):
+                        response = yesno('Use cached value for '
+                                         'c<sub>filler</sub>?')
+                        if response == gtk.RESPONSE_YES:
+                            self.control_board.calibration._c_filler = c_filler
+                        else:
+                            self.set_app_values(dict(c_filler=''))
                 if self.control_board.baud_rate != app_values['baud_rate']:
                     self.control_board.baud_rate = app_values['baud_rate']
                     reconnect = True

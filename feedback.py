@@ -1,5 +1,5 @@
 """
-Copyright 2011 Ryan Fobel
+Copyright 2011-2016 Ryan Fobel and Christian Fobel
 
 This file is part of dmf_control_board.
 
@@ -16,12 +16,10 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with dmf_control_board.  If not, see <http://www.gnu.org/licenses/>.
 """
-from datetime import datetime
 from copy import deepcopy
 import logging
 import math
 import os
-import time
 try:
     import cPickle as pickle
 except ImportError:
@@ -36,30 +34,26 @@ import pandas as pd
 import matplotlib
 import matplotlib.mlab as mlab
 from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
 from path_helpers import path
-import scipy.optimize as optimize
 from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
                                                 FigureCanvasGTK)
 from matplotlib.backends.backend_gtkagg import (NavigationToolbar2GTKAgg as
                                                 NavigationToolbar)
-from microdrop_utility import SetOfInts, Version, FutureVersionError, is_float
+from microdrop_utility import SetOfInts, Version, FutureVersionError
 from microdrop_utility.gui import (textentry_validate,
                                    combobox_set_model_from_list,
-                                   combobox_get_active_text, text_entry_dialog,
-                                   FormViewDialog, yesno)
-from flatland.schema import String, Form, Integer, Boolean, Float
-from flatland.validation import ValueAtLeast
+                                   combobox_get_active_text,
+                                   FormViewDialog)
+from flatland.schema import String, Form
 from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 from microdrop.plugin_helpers import get_plugin_info
-from dmf_control_board_firmware import (FeedbackCalibration, FeedbackResults,
-                                        FeedbackResultsSeries)
+from dmf_control_board_firmware import FeedbackResultsSeries
 from dmf_control_board_firmware.calibrate.hv_attenuator import (
-  plot_feedback_params)
+    plot_feedback_params)
 from dmf_control_board_firmware.calibrate.impedance_benchmarks import (
-  plot_stat_summary)
+    plot_stat_summary)
 from .wizards import (MicrodropImpedanceAssistantView,
                       MicrodropReferenceAssistantView)
 
@@ -265,26 +259,7 @@ class FeedbackOptionsController():
             self.feedback_options_menu_item.show()
             self.feedback_options_menu_item.set_sensitive(
                 app.dmf_device is not None)
-
-            #self.measure_cap_filler_menu_item = gtk.MenuItem("Measure "
-                                                             #"capacitance of "
-                                                             #"filler media")
-            #app.dmf_device_controller.view.popup.add_item(
-                #self.measure_cap_filler_menu_item)
-            #self.measure_cap_filler_menu_item.connect("activate",
-                                                      #self
-                                                      #.on_measure_cap_filler)
-            #self.measure_cap_liquid_menu_item = gtk.MenuItem("Measure "
-                                                             #"capacitance of "
-                                                             #"liquid")
-            #app.dmf_device_controller.view.popup.add_item(
-                #self.measure_cap_liquid_menu_item)
-            #self.measure_cap_liquid_menu_item.connect("activate",
-                                                      #self
-                                                      #.on_measure_cap_liquid)
             self.initialized = True
-        #self.measure_cap_filler_menu_item.show()
-        #self.measure_cap_liquid_menu_item.show()
 
     def on_plugin_disable(self):
         #self.measure_cap_filler_menu_item.hide()
@@ -308,17 +283,53 @@ class FeedbackOptionsController():
         self.window.hide()
         return True
 
-    def on_measure_cap_filler(self, widget, data=None):
+    def measure_cap_filler(self):
+        '''
+        Returns
+        -------
+
+            (dict) : The `'frequency'` item is a list of the frequencies
+                capacitance was measured at, and the `'capacitance'` item is a
+                list of the corresponding capacitance measurement at each
+                frequency.
+        '''
         c = self.measure_device_capacitance()
         self.plugin.control_board.calibration._c_filler = c
         self.plugin.set_app_values(dict(c_filler=yaml.dump(c)))
+        return self.plugin.control_board.calibration._c_filler
 
-    def on_measure_cap_liquid(self, widget, data=None):
+    def measure_cap_liquid(self):
+        '''
+        Returns
+        -------
+
+            (dict) : The `'frequency'` item is a list of the frequencies
+                capacitance was measured at, and the `'capacitance'` item is a
+                list of the corresponding capacitance measurement at each
+                frequency.
+        '''
         c = self.measure_device_capacitance()
         self.plugin.control_board.calibration._c_drop = c
         self.plugin.set_app_values(dict(c_drop=yaml.dump(c)))
+        return self.plugin.control_board.calibration._c_drop
 
     def measure_device_capacitance(self):
+        '''
+        Measure specific capacitance (F/mm^2) of actuated electrodes area at
+        several frequencies.
+
+        Returns
+        -------
+
+            (dict) : The `'frequency'` item is a list of the frequencies
+                capacitance was measured at, and the `'capacitance'` item is a
+                list of the corresponding capacitance measurement at each
+                frequency.
+        '''
+        if (self.plugin.control_board is None or not
+            self.plugin.control_board.connected()):
+            raise IOError('Not connected to control board.')
+
         app = get_app()
         area = self.plugin.get_actuated_area()
 
@@ -330,7 +341,7 @@ class FeedbackOptionsController():
         step = app.protocol.current_step()
         dmf_options = step.get_data(self.plugin.name)
 
-        max_channels = self.control_board.number_of_channels()
+        max_channels = self.plugin.control_board.number_of_channels()
         # All channels should default to off.
         channel_states = np.zeros(max_channels, dtype=int)
         # Set the state of any channels that have been set explicitly.
@@ -356,7 +367,7 @@ class FeedbackOptionsController():
             data = self.plugin.measure_impedance(
                 app_values['sampling_window_ms'],
                 int(math.ceil(test_options.duration /
-                              (app_values['sampling_window_ms'] + \
+                              (app_values['sampling_window_ms'] +
                                app_values['delay_between_windows_ms']))),
                 app_values['delay_between_windows_ms'],
                 app_values['interleave_feedback_samples'],
@@ -365,11 +376,11 @@ class FeedbackOptionsController():
             results.add_data(frequency, data)
             results.area = area
             capacitance = np.mean(results.capacitance())
-            logging.info('\tcapacitance = %e F (%e F/mm^2)' % \
-                     (capacitance, capacitance / area))
+            logging.info('\tcapacitance = %e F (%e F/mm^2)' %
+                         (capacitance, capacitance / area))
 
         capacitance = np.mean(results.capacitance())
-        logging.info('mean(capacitance) = %e F (%e F/mm^2)' % \
+        logging.info('mean(capacitance) = %e F (%e F/mm^2)' %
                      (capacitance, capacitance / area))
 
         # set the frequency back to it's original state
@@ -378,7 +389,7 @@ class FeedbackOptionsController():
                     interface=IWaveformGenerator)
         self.plugin.check_impedance(dmf_options)
 
-        # turn off all electrodes if we're not in realtime mode
+        # Turn off all electrodes if we're not in realtime mode.
         if not app.realtime_mode:
             self.plugin.control_board.set_state_of_all_channels(
                 np.zeros(max_channels, dtype=int))
@@ -425,8 +436,8 @@ class FeedbackOptionsController():
         feedback_options = options.feedback_options
 
         if (feedback_options.action.__class__ ==  RetryAction and
-            app_values['use_force_normalization'] and 
-            self.plugin.control_board.calibration and 
+            app_values['use_force_normalization'] and
+            self.plugin.control_board.calibration and
             self.plugin.control_board.calibration._c_drop
         ):
             feedback_options.action.increase_voltage = (
@@ -439,7 +450,7 @@ class FeedbackOptionsController():
                     options.frequency
                 )
             )
-        if (self.plugin.name == plugin_name and 
+        if (self.plugin.name == plugin_name and
             app.protocol.current_step_number == step_number
         ):
             self._set_gui_sensitive(feedback_options)
@@ -450,7 +461,7 @@ class FeedbackOptionsController():
             app = get_app()
             app_values = self.plugin.get_app_values()
             if (app_values['use_force_normalization'] and
-                self.plugin.control_board.calibration and 
+                self.plugin.control_board.calibration and
                 self.plugin.control_board.calibration._c_drop
             ):
                 self.builder.get_object("label_increase_voltage")\
@@ -467,9 +478,8 @@ class FeedbackOptionsController():
                 self._update_gui_state(options)
 
     def _update_gui_state(self, options):
-        app = get_app()
         app_values = self.plugin.get_app_values()
-        
+
         # update the state of the "Feedback enabled" check button
         button = self.builder.get_object("button_feedback_enabled")
         if options.feedback_enabled != button.get_active():
@@ -487,9 +497,9 @@ class FeedbackOptionsController():
         if retry:
             self.builder.get_object("textentry_percent_threshold")\
                 .set_text(str(options.action.percent_threshold))
-                
-            if (app_values['use_force_normalization'] and 
-                self.plugin.control_board.calibration and 
+
+            if (app_values['use_force_normalization'] and
+                self.plugin.control_board.calibration and
                 self.plugin.control_board.calibration._c_drop
             ):
                 self.builder.get_object("textentry_increase_voltage")\
@@ -742,8 +752,8 @@ class FeedbackOptionsController():
         app_values = self.plugin.get_app_values()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
-        if (app_values['use_force_normalization'] and 
-            self.plugin.control_board.calibration and 
+        if (app_values['use_force_normalization'] and
+            self.plugin.control_board.calibration and
             self.plugin.control_board.calibration._c_drop
         ):
             options.action.increase_force = textentry_validate(
@@ -1186,10 +1196,10 @@ class FeedbackResultsController():
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        if area == 0:
+                        if results.area == 0:
                             continue
                         else:
-                            normalization = area
+                            normalization = results.area
 
                     self.export_data.append('step:, %d' % (row['core']["step"]
                                                            + 1))
@@ -1253,7 +1263,7 @@ class FeedbackResultsController():
                             t, dxdt = results.dxdt(filter_order=3)
                             lines = self.axis.plot(t, dxdt * 1000)
                             handles.append(lines[0])
-                            
+
                             # plot the unfiltered (raw) velocity in the same
                             # color, but a lighter shade
                             c = matplotlib.colors.colorConverter.to_rgba(
@@ -1321,10 +1331,10 @@ class FeedbackResultsController():
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        if area == 0:
+                        if results.area == 0:
                             continue
                         else:
-                            normalization = area
+                            normalization = results.area
 
                     self.export_data.append('step:, %d' %
                                             (row['core']["step"] + 1))
@@ -1406,10 +1416,10 @@ class FeedbackResultsController():
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
-                        if area == 0:
+                        if results.area == 0:
                             continue
                         else:
-                            normalization = area
+                            normalization = results.area
 
                     self.export_data.append('step:, %d' %
                                             (row['core']["step"] + 1))
