@@ -57,6 +57,7 @@ from dmf_control_board_firmware.calibrate.impedance_benchmarks import (
 from .wizards import (MicrodropImpedanceAssistantView,
                       MicrodropReferenceAssistantView)
 
+logger = logging.getLogger(__name__)
 
 # Ignore natural name warnings from PyTables [1].
 #
@@ -103,12 +104,12 @@ class RetryAction():
             FutureVersionError: file was written by a future version of the
                 software.
         """
-        logging.debug("[RetryAction]._upgrade()")
+        logger.debug("[RetryAction]._upgrade()")
         version = Version.fromstring(self.version)
-        logging.debug('[RetryAction] version=%s, class_version=%s' %
-                      (str(version), self.class_version))
+        logger.debug('[RetryAction] version=%s, class_version=%s' %
+                     (str(version), self.class_version))
         if version > Version.fromstring(self.class_version):
-            logging.debug('[RetryAction] version>class_version')
+            logger.debug('[RetryAction] version>class_version')
             raise FutureVersionError(Version.fromstring(self.class_version),
                                      version)
         elif version < Version.fromstring(self.class_version):
@@ -116,13 +117,13 @@ class RetryAction():
                 del self.capacitance_threshold
                 self.percent_threshold = 0
                 self.version = str(Version(0, 1))
-                logging.info('[RetryAction] upgrade to version %s' %
-                             self.version)
+                logger.info('[RetryAction] upgrade to version %s' %
+                            self.version)
             if version < Version(0, 2):
                 self.increase_force = 0
                 self.version = str(Version(0, 2))
-                logging.info('[RetryAction] upgrade to version %s' %
-                             self.version)
+                logger.info('[RetryAction] upgrade to version %s' %
+                            self.version)
         else:
             # Else the versions are equal and don't need to be upgraded
             pass
@@ -216,15 +217,15 @@ class FeedbackOptions():
             FutureVersionError: file was written by a future version of the
                 software.
         """
-        logging.debug('[FeedbackOptions]._upgrade()')
+        logger.debug('[FeedbackOptions]._upgrade()')
         if hasattr(self, 'version'):
             version = Version.fromstring(self.version)
         else:
             version = Version(0)
-        logging.debug('[FeedbackOptions] version=%s, class_version=%s' %
-                      (str(version), self.class_version))
+        logger.debug('[FeedbackOptions] version=%s, class_version=%s' %
+                     (str(version), self.class_version))
         if version > Version.fromstring(self.class_version):
-            logging.debug('[FeedbackOptions] version>class_version')
+            logger.debug('[FeedbackOptions] version>class_version')
             raise FutureVersionError(Version.fromstring(self.class_version),
                                      version)
         elif version < Version.fromstring(self.class_version):
@@ -334,8 +335,8 @@ class FeedbackOptionsController():
         area = self.plugin.get_actuated_area()
 
         if area == 0:
-            logging.error("At least one electrode must be actuated to perform "
-                          "calibration.")
+            logger.error("At least one electrode must be actuated to perform "
+                         "calibration.")
             return
 
         step = app.protocol.current_step()
@@ -376,12 +377,14 @@ class FeedbackOptionsController():
             results.add_data(frequency, data)
             results.area = area
             capacitance = np.mean(results.capacitance())
-            logging.info('\tcapacitance = %e F (%e F/mm^2)' %
-                         (capacitance, capacitance / area))
+            logger.info('\tcapacitance = %e F (%e F/mm^2)' % (capacitance,
+                                                              capacitance /
+                                                              area))
 
         capacitance = np.mean(results.capacitance())
-        logging.info('mean(capacitance) = %e F (%e F/mm^2)' %
-                     (capacitance, capacitance / area))
+        logger.info('mean(capacitance) = %e F (%e F/mm^2)' % (capacitance,
+                                                              capacitance /
+                                                              area))
 
         # set the frequency back to it's original state
         emit_signal("set_frequency",
@@ -625,8 +628,8 @@ class FeedbackOptionsController():
         Handler called when the "Retry until capacitance..." radio button is
         toggled.
         """
-        logging.debug('retry was toggled %s' % (('OFF',
-                                                 'ON')[widget.get_active()]))
+        logger.debug('retry was toggled %s' % (('OFF',
+                                                'ON')[widget.get_active()]))
         app = get_app()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
@@ -644,8 +647,8 @@ class FeedbackOptionsController():
         Handler called when the "Sweep Frequency..." radio button is
         toggled.
         """
-        logging.debug('sweep_frequency was toggled %s' %
-                      (('OFF', 'ON')[widget.get_active()]))
+        logger.debug('sweep_frequency was toggled %s',
+                     ('OFF', 'ON')[widget.get_active()])
         app = get_app()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
@@ -664,8 +667,8 @@ class FeedbackOptionsController():
         Handler called when the "Sweep Voltage..." radio button is
         toggled.
         """
-        logging.debug('sweep_voltage was toggled %s' %
-                      (('OFF', 'ON')[widget.get_active()]))
+        logger.debug('sweep_voltage was toggled %s',
+                     ('OFF', 'ON')[widget.get_active()])
         app = get_app()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
@@ -683,8 +686,8 @@ class FeedbackOptionsController():
         Handler called when the "Sweep Electrodes..." radio button is
         toggled.
         """
-        logging.debug('sweep_electrodes was toggled %s' %
-                      (('OFF', 'ON')[widget.get_active()]))
+        logger.debug('sweep_electrodes was toggled %s',
+                     ('OFF', 'ON')[widget.get_active()])
         app = get_app()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
@@ -1121,12 +1124,12 @@ class FeedbackResultsController():
         response = dialog.run()
         if response == gtk.RESPONSE_OK:
             filename = dialog.get_filename()
-            logging.info("Exporting to file %s." % filename)
+            logger.info("Exporting to file %s." % filename)
             try:
                 with open(filename, 'w') as f:
                     f.write("\n".join(self.export_data))
             except Exception, e:
-                logging.error("Problem exporting file. %s." % e)
+                logger.error("Problem exporting file. %s." % e)
         dialog.destroy()
 
     def on_experiment_log_selection_changed(self, data):
@@ -1499,8 +1502,8 @@ class FeedbackCalibrationController():
         selected_data = self.experiment_log_controller.get_selected_data()
         calibration = None
         if len(selected_data) > 1:
-            logging.error("Multiple steps are selected. Please choose a "
-                          "single step.")
+            logger.error("Multiple steps are selected. Please choose a "
+                         "single step.")
             return
         try:
             if 'FeedbackResults' in selected_data[0][self.plugin.name]:
@@ -1510,7 +1513,7 @@ class FeedbackCalibrationController():
                 calibration = (selected_data[0][self.plugin.name]
                                ['FeedbackResultsSeries'].calibration)
         except:
-            logging.error("This step does not contain any calibration data.")
+            logger.error("This step does not contain any calibration data.")
             return
 
         dialog = gtk.FileChooserDialog(title="Save feedback calibration",
@@ -1531,8 +1534,8 @@ class FeedbackCalibrationController():
                     break
                 else:
                     break
-            except Exception, why:
-                logging.error("Error saving calibration file. %s." % why)
+            except:
+                logger.error("Error saving calibration file.", exc_info=True)
         dialog.destroy()
 
     def on_load_log_calibration(self, widget, data=None):
@@ -1552,13 +1555,12 @@ class FeedbackCalibrationController():
             with open(filename, 'rb') as f:
                 try:
                     calibration = pickle.load(f)
-                    logging.debug("Loaded object from pickle.")
+                    logger.debug("Loaded object from pickle.")
                     if str(calibration.__class__).split('.')[-1] != \
                             'FeedbackCalibration':
                         raise ValueError()
-                except Exception, why:
-                    logging.error('Not a valid calibration file.')
-                    logging.debug(why)
+                except:
+                    logger.error('Not a valid calibration file.', exc_info=True)
         dialog.destroy()
 
         selected_data = self.experiment_log_controller.get_selected_data()
@@ -1582,7 +1584,7 @@ class FeedbackCalibrationController():
         emit_signal("on_experiment_log_selection_changed", [selected_data])
 
     def on_edit_log_calibration(self, widget, data=None):
-        logging.debug("on_edit_log_calibration()")
+        logger.debug("on_edit_log_calibration()")
         settings = {}
         schema_entries = []
         calibration_list = []
@@ -1671,20 +1673,20 @@ class FeedbackCalibrationController():
         if not valid:
             return
 
-        logging.debug("Applying updated calibration settings to log file.")
+        logger.debug("Applying updated calibration settings to log file.")
 
         def get_field_value(name, multiplier=1):
             try:
-                logging.debug('response[%s]=' % name, response[name])
-                logging.debug('settings[%s]=' % name, settings[name])
+                logger.debug('response[%s]=' % name, response[name])
+                logger.debug('settings[%s]=' % name, settings[name])
                 if (response[name] and (settings[name] is None or
                                         abs(float(response[name]) / multiplier
                                             - settings[name]) / settings[name]
                                         > .0001)):
                     return float(response[name]) / multiplier
             except ValueError:
-                logging.error('%s value (%s) is invalid.' %
-                              (name, response[name]))
+                logger.error('%s value (%s) is invalid.' % (name,
+                                                            response[name]))
             return None
 
         value = get_field_value('c_drop', 1e12)
@@ -1724,8 +1726,8 @@ class FeedbackCalibrationController():
 
     def on_perform_calibration(self, widget, data=None):
         if not self.plugin.control_board.connected():
-            logging.error("A control board must be connected in order to "
-                          "perform calibration.")
+            logger.error("A control board must be connected in order to "
+                         "perform calibration.")
             return
 
         self.calibrate_attenuators()
@@ -1772,9 +1774,9 @@ class FeedbackCalibrationController():
             window.add(vbox)
             window.show_all()
 
-            logging.info(str(fitted_params))
+            logger.info(str(fitted_params))
         except KeyError:
-            logging.error('Error loading reference calibration data.')
+            logger.error('Error loading reference calibration data.')
             return
 
     def load_impedance_calibration(self):
@@ -1814,7 +1816,7 @@ class FeedbackCalibrationController():
             window.add(vbox)
             window.show_all()
         except KeyError:
-            logging.error('Error loading device load calibration data.')
+            logger.error('Error loading device load calibration data.')
             return
 
     def calibrate_attenuators(self):

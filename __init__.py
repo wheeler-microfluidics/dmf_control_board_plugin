@@ -228,6 +228,7 @@ class DMFControlBoardOptions(object):
         if not hasattr(self, 'force'):
             self.force = self._default_force
 
+
 def format_func(value):
     if value:
         # Green
@@ -1746,5 +1747,6 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     def _file_prefix(self):
         timestamp = datetime.now().strftime('%Y-%m-%dT%Hh%Mm%S')
         return '[%05d]-%s-' % (self.control_board.serial_number, timestamp)
+
 
 PluginGlobals.pop_env()
