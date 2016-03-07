@@ -1,5 +1,5 @@
 """
-Copyright 2011 Ryan Fobel
+Copyright 2011-2016 Ryan Fobel and Christian Fobel
 
 This file is part of dmf_control_board.
 
@@ -16,12 +16,10 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with dmf_control_board.  If not, see <http://www.gnu.org/licenses/>.
 """
-from datetime import datetime
 from copy import deepcopy
 import logging
 import math
 import os
-import time
 try:
     import cPickle as pickle
 except ImportError:
@@ -36,30 +34,25 @@ import pandas as pd
 import matplotlib
 import matplotlib.mlab as mlab
 from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
 from path_helpers import path
-import scipy.optimize as optimize
 from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
                                                 FigureCanvasGTK)
 from matplotlib.backends.backend_gtkagg import (NavigationToolbar2GTKAgg as
                                                 NavigationToolbar)
-from microdrop_utility import SetOfInts, Version, FutureVersionError, is_float
+from microdrop_utility import SetOfInts, Version, FutureVersionError
 from microdrop_utility.gui import (textentry_validate,
                                    combobox_set_model_from_list,
-                                   combobox_get_active_text, text_entry_dialog,
-                                   FormViewDialog, yesno)
-from flatland.schema import String, Form, Integer, Boolean, Float
-from flatland.validation import ValueAtLeast
+                                   combobox_get_active_text, FormViewDialog)
+from flatland.schema import String, Form
 from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 from microdrop.plugin_helpers import get_plugin_info
-from dmf_control_board_firmware import (FeedbackCalibration, FeedbackResults,
-                                        FeedbackResultsSeries)
-from dmf_control_board_firmware.calibrate.hv_attenuator import (
-  plot_feedback_params)
-from dmf_control_board_firmware.calibrate.impedance_benchmarks import (
-  plot_stat_summary)
+from dmf_control_board_firmware import FeedbackResultsSeries
+from dmf_control_board_firmware.calibrate.hv_attenuator import \
+    plot_feedback_params
+from dmf_control_board_firmware.calibrate.impedance_benchmarks import \
+    plot_stat_summary
 from .wizards import (MicrodropImpedanceAssistantView,
                       MicrodropReferenceAssistantView)
 
@@ -474,7 +467,6 @@ class FeedbackOptionsController():
                 self._update_gui_state(options)
 
     def _update_gui_state(self, options):
-        app = get_app()
         app_values = self.plugin.get_app_values()
 
         # update the state of the "Feedback enabled" check button
