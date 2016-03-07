@@ -17,42 +17,43 @@ You should have received a copy of the GNU General Public License
 along with dmf_control_board.  If not, see <http://www.gnu.org/licenses/>.
 """
 from copy import deepcopy
-import logging
-import math
-import os
 try:
     import cPickle as pickle
 except ImportError:
     import pickle
+import logging
+import math
+import os
 import warnings
 
-import yaml
-import tables
-import gtk
-import numpy as np
-import pandas as pd
-import matplotlib
-import matplotlib.mlab as mlab
-from matplotlib.figure import Figure
-from path_helpers import path
-from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
-                                                FigureCanvasGTK)
-from matplotlib.backends.backend_gtkagg import (NavigationToolbar2GTKAgg as
-                                                NavigationToolbar)
-from microdrop_utility import SetOfInts, Version, FutureVersionError
-from microdrop_utility.gui import (textentry_validate,
-                                   combobox_set_model_from_list,
-                                   combobox_get_active_text, FormViewDialog)
-from flatland.schema import String, Form
-from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
-                                      get_service_instance_by_name)
-from microdrop.app_context import get_app
-from microdrop.plugin_helpers import get_plugin_info
 from dmf_control_board_firmware import FeedbackResultsSeries
 from dmf_control_board_firmware.calibrate.hv_attenuator import \
     plot_feedback_params
 from dmf_control_board_firmware.calibrate.impedance_benchmarks import \
     plot_stat_summary
+from flatland.schema import String, Form
+from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
+                                                FigureCanvasGTK)
+from matplotlib.backends.backend_gtkagg import (NavigationToolbar2GTKAgg as
+                                                NavigationToolbar)
+from matplotlib.figure import Figure
+from microdrop.app_context import get_app
+from microdrop.plugin_helpers import get_plugin_info
+from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
+                                      get_service_instance_by_name)
+from microdrop_utility import SetOfInts, Version, FutureVersionError
+from microdrop_utility.gui import (textentry_validate,
+                                   combobox_set_model_from_list,
+                                   combobox_get_active_text, FormViewDialog)
+from path_helpers import path
+import gtk
+import matplotlib
+import matplotlib.mlab as mlab
+import numpy as np
+import pandas as pd
+import tables
+import yaml
+
 from .wizards import (MicrodropImpedanceAssistantView,
                       MicrodropReferenceAssistantView)
 
