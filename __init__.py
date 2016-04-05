@@ -146,43 +146,22 @@ class DmfZmqPlugin(ZmqPlugin):
         data = decode_content_data(request)
         control_board = self.parent.control_board
 
-        if 'voltage' in data:
-            start_voltage = control_board.waveform_voltage()
-            control_board.set_waveform_voltage(data['voltage'])
-        if 'frequency' in data:
-            control_board.set_waveform_frequency(data['frequency'])
-            start_frequency = control_board.waveform_frequency()
+        n_sampling_windows = data.pop('n_sampling_windows')
+        feedback_results = self.measure(control_board.measure_impedance,
+                                        n_sampling_windows, **data)
+        return feedback_results_to_impedance_frame(feedback_results)
 
-        try:
-            app_values = self.parent.get_app_values()
-
-            # Set unspecified measurement parameters to plugin app option
-            # values.
-            sampling_window_ms = data.get('sampling_window_ms',
-                                          app_values['sampling_window_ms'])
-            delay_between_windows_ms = data.get('delay_between_windows_ms',
-                                                app_values
-                                                ['delay_between_windows_ms'])
-            interleave_samples = data.get('interleave_samples',
-                                          app_values
-                                          ['interleave_feedback_samples'])
-            use_rms = data.get('use_rms', app_values['use_rms'])
-
-            channel_count = control_board.number_of_channels()
-            state = data.get('state', channel_count * [0])
-            feedback_results = \
-                control_board.measure_impedance(sampling_window_ms,
-                                                data['n_sampling_windows'],
-                                                delay_between_windows_ms,
-                                                interleave_samples, use_rms,
-                                                state)
-            return feedback_results_to_impedance_frame(feedback_results)
-        finally:
-            # Restore original voltage and frequency as required.
-            if 'voltage' in data:
-                control_board.set_waveform_voltage(start_voltage)
-            if 'frequency' in data:
-                control_board.set_waveform_frequency(start_frequency)
+    def on_execute__sweep_channels(self, request):
+        '''
+        Measure impedance while the channels specified by `state` field are
+        actuated (no actuated channels by default).
+        '''
+        data = decode_content_data(request)
+        control_board = self.parent.control_board
+        n_sampling_windows = data.pop('n_sampling_windows')
+        df_impedances = self.measure(control_board.sweep_channels,
+                                     n_sampling_windows, **data)
+        return df_impedances
 
     def on_execute__measure_cap_filler(self, request):
         '''
@@ -199,6 +178,47 @@ class DmfZmqPlugin(ZmqPlugin):
         c = self.parent.feedback_options_controller.measure_cap_liquid()
         logger.info('[measure_cap_liquid] c=%s', c)
         return c
+
+    def measure(self, measure_func, n_sampling_windows, **kwargs):
+        '''
+        Measure impedance while the channels specified by `state` field are
+        actuated (no actuated channels by default).
+        '''
+        control_board = self.parent.control_board
+
+        if 'voltage' in kwargs:
+            start_voltage = control_board.waveform_voltage()
+            control_board.set_waveform_voltage(kwargs['voltage'])
+        if 'frequency' in kwargs:
+            control_board.set_waveform_frequency(kwargs['frequency'])
+            start_frequency = control_board.waveform_frequency()
+
+        try:
+            app_values = self.parent.get_app_values()
+
+            # Set unspecified measurement parameters to plugin app option
+            # values.
+            sampling_window_ms = kwargs.get('sampling_window_ms',
+                                            app_values['sampling_window_ms'])
+            delay_between_windows_ms = kwargs.get('delay_between_windows_ms',
+                                                  app_values
+                                                  ['delay_between_windows_ms'])
+            interleave_samples = kwargs.get('interleave_samples', app_values
+                                            ['interleave_feedback_samples'])
+            use_rms = kwargs.get('use_rms', app_values['use_rms'])
+
+            channel_count = control_board.number_of_channels()
+            state = kwargs.get('state', channel_count * [0])
+            return measure_func(sampling_window_ms,
+                                n_sampling_windows,
+                                delay_between_windows_ms, interleave_samples,
+                                use_rms, state)
+        finally:
+            # Restore original voltage and frequency as required.
+            if 'voltage' in kwargs:
+                control_board.set_waveform_voltage(start_voltage)
+            if 'frequency' in kwargs:
+                control_board.set_waveform_frequency(start_frequency)
 
 
 class DMFControlBoardOptions(object):
