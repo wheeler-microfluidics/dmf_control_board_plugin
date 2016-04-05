@@ -1248,12 +1248,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         if plugin_name == self.name:
             self.timeout_id = None
 
-    def get_impedance_data(self):
+    def get_measure_impedance_data(self):
         """
-        This function wraps the control_board.get_impedance_data() function and
+        This function wraps the control_board.get_measure_impedance_data() function and
         adds the actuated area.
         """
-        results = self.control_board.get_impedance_data()
+        results = self.control_board.get_measure_impedance_data()
         results.area = self.get_actuated_area()
         return results
 
@@ -1274,7 +1274,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app = get_app()
         area = self.get_actuated_area()
         return_value = None
-        results = self.get_impedance_data()
+        results = self.get_measure_impedance_data()
         logger.debug("V_actuation=%s" % results.V_actuation())
         logger.debug("Z_device=%s" % results.Z_device())
         app.experiment_log.add_data({"FeedbackResults": results}, self.name)
@@ -1317,7 +1317,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         # previous call
         if not first_call:
             frequency = frequencies.pop(0)
-            data = self.get_impedance_data()
+            data = self.get_measure_impedance_data()
             results.add_data(frequency, data)
             logger.debug("V_actuation=%s" % data.V_actuation())
             logger.debug("Z_device=%s" % data.Z_device())
@@ -1362,7 +1362,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         # previous call
         if not first_call:
             voltage = voltages.pop(0)
-            data = self.get_impedance_data()
+            data = self.get_measure_impedance_data()
             results.add_data(voltage, data)
             logger.debug("V_actuation=%s" % data.V_actuation())
             logger.debug("Z_device=%s" % data.Z_device())
