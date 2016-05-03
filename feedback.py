@@ -1646,8 +1646,8 @@ class FeedbackCalibrationController():
             set_field_value('C_fb_%d' % i, 1e12)
 
         form = Form.of(*sorted(schema_entries, key=lambda x: x.name))
-        dialog = FormViewDialog('Edit calibration settings')
-        valid, response = dialog.run(form)
+        dialog = FormViewDialog(form, 'Edit calibration settings')
+        valid, response = dialog.run()
 
         if not valid:
             return

@@ -806,8 +806,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     validators=[ValueAtLeast(minimum=0), ]))
 
         form = Form.of(*schema_entries)
-        dialog = FormViewDialog('Edit configuration settings')
-        valid, response = dialog.run(form)
+        dialog = FormViewDialog(form, 'Edit configuration settings')
+        valid, response = dialog.run()
         if valid:
             for k, v in response.items():
                 if settings[k] != v:
