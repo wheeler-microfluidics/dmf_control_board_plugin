@@ -1109,6 +1109,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             # if the signal is less than the voltage tolerance
             if results.V_actuation()[-1] < self.control_board.voltage_tolerance:
+                if self.control_board.auto_adjust_amplifier_gain:
+                    # reset the amplifier gain to a high value
+                    self.control_board.amplifier_gain = 300
                 error_msg = ("Low voltage detected. Please check that the "
                              "amplifier is on.")
                 logger.error(error_msg)
