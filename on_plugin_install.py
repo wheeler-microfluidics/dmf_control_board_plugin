@@ -12,11 +12,21 @@ if __name__ == '__main__':
                  str(datetime.now()), plugin_root.name)
     requirements_file = plugin_root.joinpath('requirements.txt')
     if requirements_file.exists():
-        # Install required packages using `pip`, with Wheeler Lab wheels server
-        # for binary wheels not available on `PyPi`.
-        print install(['--find-links', 'http://192.99.4.95/wheels',
-                       '--trusted-host', '192.99.4.95', '-r',
-                       requirements_file])
+        try:
+            # Install required packages using `pip`, with Wheeler Lab wheels server
+            # for binary wheels not available on `PyPi`.
+            print install(['--find-links', 'http://192.99.4.95/wheels',
+                           '--trusted-host', '192.99.4.95', '-r',
+                           requirements_file])
+        except Exception, e:
+            print('%s\n\n'
+                  'Error installing dependencies. Microdrop will attempt to relaunch\n'
+                  'with elevated priviledges to fix this problem. If this fails, you\n'
+                  'may need to relaunch Microdrop manually.\n' % e)
+            print 'Press <Enter> key to continue...'
+            raw_input()
+            raise
+
         print ('[%s] Completed post-install processing for: %s' %
                (str(datetime.now()), plugin_root.name))
         print 'Press <Enter> key to continue...'
