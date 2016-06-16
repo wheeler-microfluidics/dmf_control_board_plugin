@@ -2,6 +2,6 @@ wheeler.dmf-control-board-firmware>=1.2.post4
 matplotlib>=1.5.0
 serial_device
 nested_structures
-wheeler.pygtkhelpers>=0.13.post8
+wheeler.pygtkhelpers>=0.14
 sympy>=0.7.6
 tables>=3.2.2
