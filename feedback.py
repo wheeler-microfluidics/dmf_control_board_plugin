@@ -376,7 +376,7 @@ class FeedbackOptionsController():
                 channel_states)
             results.add_data(frequency, data)
             results.area = area
-            capacitance = np.mean(results.capacitance())
+            capacitance = np.mean(data.capacitance())
             logger.info('\tcapacitance = %e F (%e F/mm^2)' % (capacitance,
                                                               capacitance /
                                                               area))
