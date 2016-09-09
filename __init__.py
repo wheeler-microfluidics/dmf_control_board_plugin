@@ -30,6 +30,7 @@ from dmf_control_board_firmware import (DMFControlBoard, FeedbackResultsSeries,
 from feedback import (FeedbackOptions, FeedbackOptionsController,
                       FeedbackCalibrationController, FeedbackResultsController,
                       RetryAction, SweepFrequencyAction, SweepVoltageAction)
+import arrow
 from flatland import Integer, Boolean, Float, Form, Enum, String
 from flatland.validation import ValueAtLeast, ValueAtMost
 from microdrop.app_context import get_app, get_hub_uri
@@ -219,6 +220,68 @@ class DmfZmqPlugin(ZmqPlugin):
                 control_board.set_waveform_voltage(start_voltage)
             if 'frequency' in kwargs:
                 control_board.set_waveform_frequency(start_frequency)
+
+
+def microdrop_experiment_log_to_feedback_results_df(log):
+    # get the FeedbackResults object for each step
+    results = log.get('FeedbackResults',
+                      plugin_name=get_plugin_info(path(__file__).parent).plugin_name)
+
+    # get the start time for each step (in seconds), relative to the beginning of the protocol
+    step_start_time = log.get('time')
+
+    start_time = arrow.get(log.get('start time')[0])
+
+    # combine all steps in the protocol into a single dataframe
+    feedback_results_df = pd.DataFrame()
+    for i, step in enumerate(results):
+        if step is None:
+            continue
+        else:
+            # reset index (step_time is no longer unique for the full dataset)
+            df = step.to_df().reset_index()
+
+            # add step_index and utc_time columns (index by utc_time)
+            df.insert(0, 'step_index', i)
+            df.insert(0, 'utc_timestamp', [start_time.replace(
+                        seconds=step_start_time[i] + t).datetime
+                                      for t in df['step_time']])
+            df.set_index('utc_timestamp', inplace=True)
+
+            feedback_results_df = feedback_results_df.append(df)
+    return feedback_results_df
+
+
+def feedback_results_df_to_step_summary_df(feedback_results_df):
+    # create a step summary dataframe for the experiment
+    grouped = feedback_results_df.reset_index().groupby('step_index')
+
+    # by default, use the last value in the group
+    # (e.g., final capacitance, Z_device)
+    steps = grouped.last()
+
+    # for utc_time, use the first value in the group (i.e., start of the step)
+    steps[['utc_timestamp']] = grouped.first()[['utc_timestamp']]
+
+    # for force and voltage, use the mean value
+    steps[['force', 'voltage']] = grouped.mean()[['force', 'voltage']]
+
+    # remove dxdt and dxdt_filtered
+    del steps['dxdt'], steps['dxdt_filtered']
+
+    # rename columns
+    steps.rename(columns={'step_time': 'step_duration',
+                          'force': 'mean_force',
+                          'voltage': 'mean_voltage',
+                          'Z_device_filtered': 'final_Z_device_filtered',
+                          'capacitance_filtered': 'final_capacitance_filtered',
+                          'x_position_filtered': 'final_x_position_filtered',
+                          'Z_device': 'final_Z_device',
+                          'capacitance': 'final_capacitance',
+                          'x_position': 'final_x_position'},
+                 inplace=True)
+
+    return steps.reset_index().set_index('utc_timestamp')
 
 
 class DMFControlBoardOptions(object):
@@ -1731,6 +1794,14 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             except:
                 pass
         log.add_data(data)
+
+    def on_export_experiment_log_data(self, log):
+        feedback_results_df = microdrop_experiment_log_to_feedback_results_df(log)
+        step_summary_df = feedback_results_df_to_step_summary_df(feedback_results_df)
+        data = {}
+        data['feedback results'] = feedback_results_df
+        data['step summary'] = step_summary_df
+        return data
 
     def get_schedule_requests(self, function_name):
         """
