@@ -1179,6 +1179,21 @@ class FeedbackResultsController():
             self.axis.set_title("x-position")
             self.axis.set_ylabel("x-position (mm)")
 
+        # Extract electrode states from protocol step.
+        def _get_actuated_area(protocol, row):
+            area = 0
+
+            plugin_data = (protocol[row['core']["step"]]
+                .get_data('wheelerlab.electrode_controller_plugin'))
+
+            if 'electrode_states' in plugin_data:
+                electrode_states = plugin_data['electrode_states']
+
+                # Compute area of actuated electrodes.
+                area = dmf_device.get_actuated_electrodes_area(electrode_states)
+
+            return area
+
         handles = []
         if x_axis == "Time":
             self.axis.set_xlabel("Time (ms)")
@@ -1186,16 +1201,10 @@ class FeedbackResultsController():
                 if (self.plugin.name in row.keys() and "FeedbackResults" in
                         row[self.plugin.name].keys()):
                     results = row[self.plugin.name]["FeedbackResults"]
-                    # Extract electrode states from protocol step.
-                    electrode_states = (protocol[row['core']["step"]]
-                                        .get_data('wheelerlab.'
-                                                  'electrode_controller'
-                                                  '_plugin')
-                                        ['electrode_states'])
-                    # Compute area of actuated electrodes.
-                    results.area =\
-                        dmf_device.get_actuated_electrodes_area(
-                            electrode_states)
+
+                    # results.area was not set in old versions of the software,
+                    # so this is necessary for backwards compatibility
+                    results.area = _get_actuated_area(protocol, row)
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
@@ -1323,14 +1332,9 @@ class FeedbackResultsController():
                     if results.xlabel != "Frequency":
                         continue
 
-                    electrode_states = (protocol[row['core']["step"]]
-                                        .get_data('wheelerlab.'
-                                                  'electrode_controller'
-                                                  '_plugin')
-                                        ['electrode_states'])
-                    results.area =\
-                        dmf_device.get_actuated_electrodes_area(
-                            electrode_states)
+                    # results.area was not set in old versions of the software,
+                    # so this is necessary for backwards compatibility
+                    results.area = _get_actuated_area(protocol, row)
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
@@ -1408,14 +1412,9 @@ class FeedbackResultsController():
                     if results.xlabel != "Voltage":
                         continue
 
-                    electrode_states = (protocol[row['core']["step"]]
-                                        .get_data('wheelerlab.'
-                                                  'electrode_controller'
-                                                  '_plugin')
-                                        ['electrode_states'])
-                    results.area =\
-                        dmf_device.get_actuated_electrodes_area(
-                            electrode_states)
+                    # results.area was not set in old versions of the software,
+                    # so this is necessary for backwards compatibility
+                    results.area = _get_actuated_area(protocol, row)
 
                     normalization = 1.0
                     if self.checkbutton_normalize_by_area.get_active():
