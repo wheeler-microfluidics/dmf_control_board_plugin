@@ -98,6 +98,10 @@ def microdrop_experiment_log_to_feedback_results_df(log):
 
 
 def feedback_results_df_to_step_summary_df(feedback_results_df):
+    if len(feedback_results_df) == 0:
+        # return an empty dataframe
+        return pd.DataFrame()
+
     # create a step summary dataframe for the experiment
     grouped = feedback_results_df.reset_index().groupby('step_index')
 
