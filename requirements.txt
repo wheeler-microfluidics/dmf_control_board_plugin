@@ -1,4 +1,4 @@
-wheeler.dmf-control-board-firmware>=1.2.post12
+wheeler.dmf-control-board-firmware>=1.2.post17
 serial_device
 nested_structures
 wheeler.pygtkhelpers>=0.14
