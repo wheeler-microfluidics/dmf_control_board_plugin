@@ -239,7 +239,7 @@ def microdrop_experiment_log_to_feedback_results_df(log):
             continue
         else:
             # reset index (step_time is no longer unique for the full dataset)
-            df = step.to_df().reset_index()
+            df = step.to_frame().reset_index()
 
             # add step_index and utc_time columns (index by utc_time)
             df.insert(0, 'step_index', i)
