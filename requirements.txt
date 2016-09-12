@@ -1,5 +1,5 @@
 arrow
-wheeler.dmf-control-board-firmware>=1.2.post17
+wheeler.dmf-control-board-firmware>=1.2.post18
 serial_device
 nested_structures
 wheeler.pygtkhelpers>=0.14
