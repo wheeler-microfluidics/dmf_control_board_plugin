@@ -89,7 +89,7 @@ def microdrop_experiment_log_to_feedback_results_df(log):
             # add step_index and utc_time columns (index by utc_time)
             df.insert(0, 'step_index', i)
             df.insert(0, 'utc_timestamp', [start_time.replace(
-                        seconds=step_start_time[i] + t).datetime
+                        seconds=step_start_time[i] + t).datetime.replace(tzinfo=None)
                                       for t in df['step_time']])
             df.set_index('utc_timestamp', inplace=True)
 
