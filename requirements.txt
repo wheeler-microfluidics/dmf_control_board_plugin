@@ -5,3 +5,4 @@ nested_structures
 wheeler.pygtkhelpers>=0.14
 sympy>=0.7.6
 tables>=3.2.2
+microdrop-plugin-template
