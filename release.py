@@ -51,6 +51,10 @@ def readGitVersion():
     if branch.strip() != 'master' and not branch.startswith('release'):
         version += '.dev%d' % int(m.group('sha'), 16)
 
+    # Ensure version string has major, minor and micro components.
+    while len(version.split('.')) < 3:
+        version += '.0'
+
     return version
 
 version = readGitVersion().replace('post', '')
