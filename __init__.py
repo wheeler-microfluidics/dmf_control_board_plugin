@@ -1,5 +1,7 @@
 """
-Copyright 2011 Ryan Fobel
+Copyright 2011-2016
+Ryan Fobel
+Christian Fobel
 
 This file is part of dmf_control_board.
 
@@ -54,9 +56,9 @@ from feedback import (FeedbackOptions, FeedbackOptionsController,
                       FeedbackCalibrationController,
                       FeedbackResultsController, RetryAction,
                       SweepFrequencyAction, SweepVoltageAction)
-from serial_device import SerialDevice, get_serial_ports
 from nested_structures import apply_depth_first, apply_dict_depth_first
 from .wizards import MicrodropChannelsAssistantView
+import dmf_control_board_firmware as dmf
 
 
 # Ignore natural name warnings from PyTables [1].
@@ -210,36 +212,37 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     implements(IPlugin)
     implements(IWaveformGenerator)
 
-    serial_ports_ = [port for port in get_serial_ports()]
-    if len(serial_ports_):
-        default_port_ = serial_ports_[0]
-    else:
-        default_port_ = None
-
-    AppFields = Form.of(
-        Integer.named('sampling_window_ms').using(default=5, optional=True,
-                                                validators=
-                                                [ValueAtLeast(minimum=0), ],),
-        Integer.named('delay_between_windows_ms')
-        .using(default=0, optional=True, validators=[ValueAtLeast(minimum=0),
-                                                     ],),
-        Boolean.named('use_rms').using(default=True, optional=True),
-        Boolean.named('interleave_feedback_samples').using(default=True,
-                                                           optional=True),
-        Enum.named('serial_port').using(default=default_port_,
-                                        optional=True).valued(*serial_ports_),
-        Integer.named('baud_rate')
-        .using(default=115200, optional=True, validators=[ValueAtLeast(minimum=0),
-                                                     ],),
-        Boolean.named('auto_atx_power_off').using(default=False, optional=True),
-        Boolean.named('use_force_normalization').using(default=False, optional=True),
-        String.named('c_drop').using(default='', optional=True,
-                                     properties={'show_in_gui':
-                                                 False}),
-        String.named('c_filler').using(default='', optional=True,
-                                     properties={'show_in_gui':
-                                                 False}),
-    )
+    @property
+    def AppFields(self):
+        # Get list of ports matching Mega2560 USB vendor/product ID.
+        comports = dmf.serial_ports().index.tolist()
+        default_port = comports[0] if comports else None
+        return Form.of(Integer.named('sampling_window_ms')
+                       .using(default=5, optional=True, validators=
+                              [ValueAtLeast(minimum=0), ],),
+                       Integer.named('delay_between_windows_ms')
+                       .using(default=0, optional=True,
+                              validators=[ValueAtLeast(minimum=0), ],),
+                       Boolean.named('use_rms').using(default=True,
+                                                      optional=True),
+                       Boolean.named('interleave_feedback_samples')
+                       .using(default=True, optional=True),
+                       Enum.named('serial_port').using(default=default_port,
+                                                       optional=True)
+                       .valued(*comports),
+                       Integer.named('baud_rate')
+                       .using(default=115200, optional=True,
+                              validators=[ValueAtLeast(minimum=0), ],),
+                       Boolean.named('auto_atx_power_off')
+                       .using(default=False, optional=True),
+                       Boolean.named('use_force_normalization')
+                       .using(default=False, optional=True),
+                       String.named('c_drop').using(default='', optional=True,
+                                                    properties={'show_in_gui':
+                                                                False}),
+                       String.named('c_filler')
+                       .using(default='', optional=True,
+                              properties={'show_in_gui': False}))
 
     StepFields = Form.of(
         Integer.named('duration').using(default=100, optional=True,
@@ -530,19 +533,23 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         '''
         self.current_frequency = None
         self.amplifier_gain_initialized = False
-        if len(DMFControlBoardPlugin.serial_ports_):
+        # Get list of Mega2560 serial ports.
+        comports = dmf.serial_ports().index.tolist()
+        if len(comports):
+            # Try to connect to the last successful port (if it is available).
             app_values = self.get_app_values()
-            # try to connect to the last successful port
-            try:
-                self.control_board.connect(str(app_values['serial_port']),
-                    app_values['baud_rate'])
-            except BadVGND, why:
-                logger.warning(why)
-            except RuntimeError, why:
-                logger.warning('Could not connect to control board on port %s.'
-                               ' Checking other ports... [%s]' %
-                               (app_values['serial_port'], why))
-                self.control_board.connect(baud_rate=app_values['baud_rate'])
+            most_recent_port = str(app_values['serial_port'])
+            if most_recent_port in comports:
+                # Most recently connected port is available.  Move it to the
+                # head of the list of COM ports to try to connect on.
+                comports.remove(most_recent_port)
+                comports.insert(0, most_recent_port)
+            elif most_recent_port:
+                logger.warning('Control board not found on most recently '
+                               'connected port (%s). Checking other ports...',
+                               most_recent_port)
+            # Try to connect to control board on available ports.
+            self.control_board.connect(comports, app_values['baud_rate'])
             app_values['serial_port'] = self.control_board.port
             self.set_app_values(app_values)
         else:
