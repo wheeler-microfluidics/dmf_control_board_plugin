@@ -3,8 +3,8 @@ import yaml
 
 from microdrop_utility import Version
 
-package_name = 'dmf_control_board'
-plugin_name = 'wheelerlab.dmf_control_board'
+package_name = 'dmf_control_board_plugin'
+plugin_name = 'wheelerlab.dmf_control_board_plugin'
 
 # create a version sting based on the git revision/branch
 version = str(Version.from_git_repository())
