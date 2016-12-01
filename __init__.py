@@ -368,7 +368,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     def AppFields(self):
         # Get list of ports matching Mega2560 USB vendor/product ID.
         comports = dmf.serial_ports().index.tolist()
-        default_port_ = comports[0] if comports else None
+        default_port = comports[0] if comports else None
         return Form.of(Integer.named('sampling_window_ms')
                        .using(default=5, optional=True, validators=
                               [ValueAtLeast(minimum=0), ],),
@@ -379,7 +379,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                                       optional=True),
                        Boolean.named('interleave_feedback_samples')
                        .using(default=True, optional=True),
-                       Enum.named('serial_port').using(default=default_port_,
+                       Enum.named('serial_port').using(default=default_port,
                                                        optional=True)
                        .valued(*comports),
                        Integer.named('baud_rate')
