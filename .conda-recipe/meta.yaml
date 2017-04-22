@@ -40,6 +40,10 @@ requirements:
     - sympy >=0.7.6
     - wheeler.pygtkhelpers >=0.14
 
+test:
+  commands:
+    - python -c "import importlib; import mpm.api; import os; import sys; sys.path.insert(0, mpm.api.MICRODROP_CONDA_SHARE.joinpath('plugins', 'available')); importlib.import_module(os.environ.get('PKG_NAME'))"
+
 about:
   home: http://github.com/wheeler-microfluidics/dmf_control_board_plugin
   license: BSD
