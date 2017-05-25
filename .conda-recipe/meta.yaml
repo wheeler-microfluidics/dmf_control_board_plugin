@@ -1,0 +1,40 @@
+# source will be downloaded prior to filling in jinja templates
+# Example assumes that this folder has setup.py in it
+source:
+  git_url: ../
+
+package:
+  name: dmf-control-board-plugin-requirements
+{% if GIT_DESCRIBE_NUMBER > '0' %}
+  version: {{ GIT_DESCRIBE_TAG[1:] }}.post{{ GIT_DESCRIBE_NUMBER }}
+{% else %}
+  version: {{ GIT_DESCRIBE_TAG[1:] }}
+{% endif %}
+
+requirements:
+  build:
+    - arrow
+    - dmf-control-board-firmware >=1.5.0
+    - flatland-fork
+    - microdrop >=2.4
+    - microdrop-plugin-manager >=0.11
+    - nested-structures
+    - path_helpers >=0.2.post3
+    - pytables >=3.2.2
+    - sympy >=0.7.6
+    - wheeler.pygtkhelpers >=0.14
+
+  run:
+    - arrow
+    - dmf-control-board-firmware >=1.5.0
+    - flatland-fork
+    - microdrop-plugin-manager >=0.11
+    - nested-structures
+    - path_helpers >=0.2.post3
+    - pytables >=3.2.2
+    - sympy >=0.7.6
+    - wheeler.pygtkhelpers >=0.14
+
+about:
+  home: http://github.com/wheeler-microfluidics/dmf_control_board_plugin_requirements
+  license: BSD
