@@ -314,6 +314,22 @@ class DMFControlBoardOptions(object):
         if not hasattr(self, 'force'):
             self.force = self._default_force
 
+    def to_dict(self):
+        result = {k: getattr(self, k) for k in ('duration', 'force',
+                                                'frequency', 'voltage')}
+        result['feedback_options'] = self.feedback_options.to_dict()
+        result['__class__'] = '.'.join([self.__class__.__module__,
+                                        self.__class__.__name__])
+        return result
+
+    @classmethod
+    def from_dict(self, options_dict):
+        options_dict.pop('__class__', None)
+        feedback_options = options_dict.pop('feedback_options')
+        options_dict['feedback_options'] = (FeedbackOptions
+                                            .from_dict(feedback_options))
+        return DMFControlBoardOptions(**options_dict)
+
 
 def format_func(value):
     if value:

@@ -114,16 +114,17 @@ class RetryAction():
                                      version)
         elif version < Version.fromstring(self.class_version):
             if version < Version(0, 1):
-                del self.capacitance_threshold
+                if hasattr(self, 'capacitance_threshold'):
+                    del self.capacitance_threshold
                 self.percent_threshold = 0
                 self.version = str(Version(0, 1))
-                logger.info('[RetryAction] upgrade to version %s' %
-                            self.version)
+                logger.debug('[RetryAction] upgrade to version %s' %
+                             self.version)
             if version < Version(0, 2):
                 self.increase_force = 0
                 self.version = str(Version(0, 2))
-                logger.info('[RetryAction] upgrade to version %s' %
-                            self.version)
+                logger.debug('[RetryAction] upgrade to version %s' %
+                             self.version)
         else:
             # Else the versions are equal and don't need to be upgraded
             pass
@@ -197,8 +198,7 @@ class FeedbackOptions():
     """
     class_version = str(Version(0, 1))
 
-    def __init__(self, feedback_enabled=None,
-                 action=None):
+    def __init__(self, feedback_enabled=None, action=None):
         if feedback_enabled:
             self.feedback_enabled = feedback_enabled
         else:
@@ -235,6 +235,19 @@ class FeedbackOptions():
                 del self.delay_between_samples_ms
             self.version = self.class_version
         # else the versions are equal and don't need to be upgraded
+
+    def to_dict(self):
+        action_dict = self.action.__dict__
+        action_dict.pop('version', None)
+
+        return {'feedback_enabled': self.feedback_enabled,
+                'action': action_dict}
+
+    @classmethod
+    def from_dict(cls, options_dict):
+        action = RetryAction(**options_dict['action'])
+        return FeedbackOptions(feedback_enabled=
+                               options_dict['feedback_enabled'], action=action)
 
 
 class FeedbackOptionsController():
