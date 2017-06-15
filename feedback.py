@@ -1197,7 +1197,7 @@ class FeedbackResultsController():
             area = 0
 
             plugin_data = (protocol[row['core']["step"]]
-                .get_data('wheelerlab.electrode_controller_plugin'))
+                           .get_data('microdrop.electrode_controller_plugin'))
 
             if 'electrode_states' in plugin_data:
                 electrode_states = plugin_data['electrode_states']

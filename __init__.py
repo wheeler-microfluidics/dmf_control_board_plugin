@@ -95,10 +95,10 @@ class DmfZmqPlugin(ZmqPlugin):
         try:
             msg_frames = self.subscribe_socket.recv_multipart(zmq.NOBLOCK)
             source, target, msg_type, msg_json = msg_frames
-            if ((source == 'wheelerlab.electrode_controller_plugin') and
+            if ((source == 'microdrop.electrode_controller_plugin') and
                 (msg_type == 'execute_reply')):
-                # The 'wheelerlab.electrode_controller_plugin' plugin maintains
-                # the requested state of each electrode.
+                # The 'electrode_controller_plugin' plugin maintains the
+                # requested state of each electrode.
                 msg = json.loads(msg_json)
                 if msg['content']['command'] in ('set_electrode_state',
                                                  'set_electrode_states'):
@@ -112,7 +112,7 @@ class DmfZmqPlugin(ZmqPlugin):
                         self.parent.channel_states.iloc[0:0]
                     self.parent.update_channel_states(data['channel_states'])
             elif (self._electrode_commands_registered < 2 and
-                  (source == 'wheelerlab.dmf_device_ui_plugin')):
+                  (source == 'dmf_device_ui_plugin')):
                 # Register electrode commands with device UI plugin.
                 logger.info('Register electrode commands with device UI '
                             'plugin.')
@@ -122,7 +122,7 @@ class DmfZmqPlugin(ZmqPlugin):
                                         'measure_cap_filler')):
                     def on_registered(reply):
                         self._electrode_commands_registered += 1
-                    self.execute_async('wheelerlab.dmf_device_ui_plugin',
+                    self.execute_async('dmf_device_ui_plugin',
                                        'register_electrode_command',
                                        extra_kwargs={'command': command},
                                        title=title, callback=on_registered)
@@ -1833,7 +1833,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         instances) for the function specified by function_name.
         """
         if function_name == 'on_step_swapped':
-            return [ScheduleRequest('wheelerlab.electrode_controller_plugin',
+            return [ScheduleRequest('microdrop.electrode_controller_plugin',
                                     self.name)]
         elif function_name in ['on_step_options_changed']:
             return [ScheduleRequest(self.name,
