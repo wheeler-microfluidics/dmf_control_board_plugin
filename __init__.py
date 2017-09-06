@@ -44,6 +44,7 @@ from microdrop.plugin_manager import (IPlugin, IWaveformGenerator, Plugin,
 from microdrop_utility.gui import yesno, FormViewDialog
 from nested_structures import apply_depth_first, apply_dict_depth_first
 from path_helpers import path
+from pygtkhelpers.gthreads import gtk_threadsafe
 from pygtkhelpers.ui.dialogs import info as info_dialog
 from zmq_plugin.plugin import Plugin as ZmqPlugin
 from zmq_plugin.schema import decode_content_data
@@ -436,6 +437,11 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     version = get_plugin_info(path(__file__).parent).version
 
     def __init__(self):
+        '''
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code blocks,
+            ensuring the code runs in the main GTK thread.
+        '''
         self.control_board = DMFControlBoard()
         self.name = get_plugin_info(path(__file__).parent).plugin_name
         self.url = self.control_board.host_url()
@@ -448,16 +454,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.n_voltage_adjustments = None
         self.amplifier_gain_initialized = False
         self.current_frequency = None
-        self.save_control_board_configuration = gtk.MenuItem("Edit "
-                                                             "configuration")
-        self.edit_log_calibration_menu_item = gtk.MenuItem("Edit calibration")
-        self.save_log_calibration_menu_item = gtk.MenuItem("Save calibration "
-                                                           "to file")
-        self.load_log_calibration_menu_item = gtk.MenuItem("Load calibration "
-                                                           "from file")
+
         self.timeout_id = None
         self.watchdog_timeout_id = None
-
         self.menu_actions = ['Test channels...',
                              ('Calibration',
                               ['Calibrate reference load',
@@ -473,6 +472,20 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self.channel_states = pd.Series()
         self.plugin = None
         self.plugin_timeout_id = None
+
+        @gtk_threadsafe
+        def _init_menu_ui():
+            self.save_control_board_configuration = \
+                gtk.MenuItem("Edit configuration")
+            self.edit_log_calibration_menu_item = gtk.MenuItem("Edit "
+                                                               "calibration")
+            self.save_log_calibration_menu_item = gtk.MenuItem("Save "
+                                                               "calibration "
+                                                               "to file")
+            self.load_log_calibration_menu_item = gtk.MenuItem("Load "
+                                                               "calibration "
+                                                               "from file")
+        _init_menu_ui()
 
     def update_channel_states(self, channel_states):
         # Update locally cached channel states with new modified states.
@@ -496,9 +509,13 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             self.plugin = None
 
     def on_plugin_enable(self):
+        '''
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code blocks,
+            ensuring the code runs in the main GTK thread.
+        '''
         logger.info('on_plugin_enable')
         super(DMFControlBoardPlugin, self).on_plugin_enable()
-        app = get_app()
 
         self.cleanup_plugin()
         # Initialize 0MQ hub plugin and subscribe to hub messages.
@@ -510,7 +527,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         # Periodically process outstanding message received on plugin sockets.
         self.plugin_timeout_id = gtk.timeout_add(10, self.plugin.check_sockets)
 
-        if not self.initialized:
+        @gtk_threadsafe
+        def _init_ui():
             self.feedback_options_controller = FeedbackOptionsController(self)
             self.feedback_results_controller = FeedbackResultsController(self)
             self.feedback_calibration_controller = (
@@ -527,6 +545,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             experiment_log_controller = get_service_instance_by_name(
                 "microdrop.gui.experiment_log_controller", "microdrop")
+
             if hasattr(experiment_log_controller, 'popup'):
                 experiment_log_controller.popup.add_item(
                     self.edit_log_calibration_menu_item)
@@ -536,6 +555,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     self.load_log_calibration_menu_item)
 
             app = get_app()
+
             self.control_board_menu_item = gtk.MenuItem("DMF control board")
             app.main_window_controller.menu_tools.append(
                 self.control_board_menu_item)
@@ -578,6 +598,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             # Attach each menu item to the corresponding parent menu.
             apply_dict_depth_first(self.menu_items, attach_menu_item)
 
+            @gtk_threadsafe
             def test_channels(*args):
                 '''
                 Launch wizard to test actuation of a bank of switches *(i.e.,
@@ -632,10 +653,19 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
             self.initialized = True
 
+        if not self.initialized:
+            _init_ui()
+
         self.check_device_name_and_version()
-        self.control_board_menu_item.show()
-        self.edit_log_calibration_menu_item.show()
-        self.feedback_results_controller.feedback_results_menu_item.show()
+
+        @gtk_threadsafe
+        def _refresh_ui():
+            self.control_board_menu_item.show()
+            self.edit_log_calibration_menu_item.show()
+            self.feedback_results_controller.feedback_results_menu_item.show()
+
+        _refresh_ui()
+
         if get_app().protocol:
             self.on_step_run()
             self._update_protocol_grid()
@@ -643,10 +673,16 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     def on_plugin_disable(self):
         self.cleanup_plugin()
         self.feedback_options_controller.on_plugin_disable()
-        self.control_board_menu_item.hide()
-        self.edit_log_calibration_menu_item.hide()
-        self.feedback_results_controller.window.hide()
-        self.feedback_results_controller.feedback_results_menu_item.hide()
+
+        @gtk_threadsafe
+        def _refresh_ui():
+            self.control_board_menu_item.hide()
+            self.edit_log_calibration_menu_item.hide()
+            self.feedback_results_controller.window.hide()
+            self.feedback_results_controller.feedback_results_menu_item.hide()
+
+        _refresh_ui()
+
         if get_app().protocol:
             self.on_step_run()
             self._update_protocol_grid()
@@ -660,6 +696,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     def on_protocol_swapped(self, old_protocol, protocol):
         self._update_protocol_grid()
 
+    @gtk_threadsafe
     def _update_protocol_grid(self):
         app = get_app()
         app_values = self.get_app_values()
@@ -689,8 +726,13 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 pgc.update_grid()
 
     def on_app_options_changed(self, plugin_name):
-        app = get_app()
-        if plugin_name == self.name:
+        '''
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code, ensuring the
+            code runs in the main GTK thread.
+        '''
+        @gtk_threadsafe
+        def _cached_capacitance_prompt_and_serial_settings():
             app_values = self.get_app_values()
             reconnect = False
 
@@ -715,25 +757,30 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                             self.control_board.calibration._c_filler = c_filler
                         else:
                             self.set_app_values(dict(c_filler=''))
+
                 if self.control_board.baud_rate != app_values['baud_rate']:
                     self.control_board.baud_rate = app_values['baud_rate']
                     reconnect = True
                 if self.control_board.port != app_values['serial_port']:
                     reconnect = True
 
-            # If we're not reconnecting, we need to update the watchdog timer
-            if self.control_board.connected() and not reconnect:
-                self._update_watchdog(app_values['auto_atx_power_off'])
+                if not reconnect:
+                    # We're not reconnecting.  Update the watchdog timer.
+                    self._update_watchdog(app_values['auto_atx_power_off'])
 
-            if reconnect:
-                self.connect()
-
+                if reconnect:
+                    self.connect()
             self._update_protocol_grid()
+
+        app = get_app()
+
+        if plugin_name == self.name:
+            _cached_capacitance_prompt_and_serial_settings()
         elif plugin_name == app.name:
-            # Turn off all electrodes if we're not in realtime mode and not
-            # running a protocol.
             if self.control_board.connected() and (not app.realtime_mode and
                                                    not app.running):
+                # We're not in realtime mode and not running a protocol.
+                # Turn off all electrodes.
                 logger.info('Turning off all electrodes.')
                 self.control_board.set_state_of_all_channels(
                     np.zeros(self.control_board.number_of_channels()))
@@ -823,6 +870,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         In the case where the device firmware version does not match, display a
         dialog offering to flash the device with the firmware version that
         matches the host driver API version.
+
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code, ensuring the
+            code runs in the main GTK thread.
         '''
         try:
             self.connect()
@@ -833,40 +884,54 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             host_software_version = self.control_board.host_software_version()
             remote_software_version = self.control_board.software_version()
 
-            # Reflash the firmware if it is not the right version.
-            if host_software_version != remote_software_version:
+            @gtk_threadsafe
+            def _firmware_update_prompt():
                 response = yesno("The control board firmware version (%s) "
                                  "does not match the driver version (%s). "
                                  "Update firmware?" % (remote_software_version,
                                                        host_software_version))
                 if response == gtk.RESPONSE_YES:
                     self.on_flash_firmware()
+
+            # Reflash the firmware if it is not the right version.
+            if host_software_version != remote_software_version:
+                _firmware_update_prompt()
         except Exception, why:
             logger.warning("%s" % why)
 
         self.update_connection_status()
 
     def on_flash_firmware(self, widget=None, data=None):
-        app = get_app()
-        try:
-            connected = self.control_board.connected()
-            if not connected:
-                self.connect()
+        '''
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code, ensuring the
+            code runs in the main GTK thread.
+        '''
+        @gtk_threadsafe
+        def _config_save_prompt_and_flash():
             response = yesno("Save current control board configuration before "
                              "flashing?")
             if response == gtk.RESPONSE_YES:
-                self.save_config()
-            hardware_version = utility.Version.fromstring(
-                self.control_board.hardware_version()
-            )
-            if not connected:
-                self.control_board.disconnect()
-            self.control_board.flash_firmware(hardware_version)
-            app.main_window_controller.info("Firmware updated successfully.",
-                                            "Firmware update")
-        except Exception, why:
-            logger.error("Problem flashing firmware. ""%s" % why)
-        self.check_device_name_and_version()
+                self.save_config_dialog()
+            try:
+                hardware_version =\
+                    utility.Version.fromstring(self.control_board
+                                               .hardware_version())
+                if not connected:
+                    self.control_board.disconnect()
+                self.control_board.flash_firmware(hardware_version)
+                app.main_window_controller.info("Firmware updated "
+                                                "successfully.",
+                                                "Firmware update")
+            except Exception, why:
+                logger.error("Problem flashing firmware. ""%s", why)
+            self.check_device_name_and_version()
+
+        app = get_app()
+        connected = self.control_board.connected()
+        if not connected:
+            self.connect()
+        _config_save_prompt_and_flash()
 
     def load_config_dialog(self):
         '''
@@ -982,9 +1047,13 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         '''
         Display a dialog to manually edit the configuration settings for the
         control board.  These settings include values that are automatically
-        adjusted during [calibration][1].
+        adjusted during calibration_.
 
-        [1] http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20calibration
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code, ensuring the
+            code runs in the main GTK thread.
+
+        .. _calibration: http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20calibration
         '''
         if not self.control_board.connected():
             logger.error("A control board must be connected in order to "
@@ -998,158 +1067,157 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         settings = {}
         settings['amplifier_gain'] = self.control_board.amplifier_gain
         schema_entries.append(
-            Float.named('amplifier_gain').using(
-                default=settings['amplifier_gain'],
-                optional=True, validators=[ValueAtLeast(minimum=0.01), ]),
-        )
-        settings['auto_adjust_amplifier_gain'] = self.control_board \
-            .auto_adjust_amplifier_gain
+            Float.named('amplifier_gain')
+            .using(default=settings['amplifier_gain'], optional=True,
+                   validators=[ValueAtLeast(minimum=0.01)]))
+        settings['auto_adjust_amplifier_gain'] = \
+            self.control_board.auto_adjust_amplifier_gain
         schema_entries.append(
-            Boolean.named('auto_adjust_amplifier_gain').using(
-                default=settings['auto_adjust_amplifier_gain'], optional=True),
-        )
+            Boolean.named('auto_adjust_amplifier_gain')
+            .using(default=settings['auto_adjust_amplifier_gain'],
+                   optional=True))
         settings['voltage_tolerance'] = self.control_board.voltage_tolerance
         schema_entries.append(
-            Float.named('voltage_tolerance').using(
-                default=settings['voltage_tolerance'], optional=True,
-                validators=[ValueAtLeast(minimum=0), ]),
-        )
+            Float.named('voltage_tolerance')
+            .using(default=settings['voltage_tolerance'], optional=True,
+                   validators=[ValueAtLeast(minimum=0)]))
         settings['use_antialiasing_filter'] = \
             self.control_board.use_antialiasing_filter
         schema_entries.append(
-            Boolean.named('use_antialiasing_filter').using(
-                default=settings['use_antialiasing_filter'], optional=True, )
-        )
+            Boolean.named('use_antialiasing_filter')
+            .using(default=settings['use_antialiasing_filter'], optional=True))
         settings['max_waveform_voltage'] = \
             self.control_board.max_waveform_voltage
         schema_entries.append(
-            Float.named('max_waveform_voltage').using(
-                default=settings['max_waveform_voltage'], optional=True,
-                validators=[ValueAtLeast(minimum=0), ]),
-        )
+            Float.named('max_waveform_voltage')
+            .using(default=settings['max_waveform_voltage'], optional=True,
+                   validators=[ValueAtLeast(minimum=0)]))
         settings['min_waveform_frequency'] = \
             self.control_board.min_waveform_frequency
         schema_entries.append(
-            Float.named('min_waveform_frequency').using(
-                default=settings['min_waveform_frequency'], optional=True,
-                validators=[ValueAtLeast(minimum=0), ]),
-        )
+            Float.named('min_waveform_frequency')
+            .using(default=settings['min_waveform_frequency'], optional=True,
+                   validators=[ValueAtLeast(minimum=0)]))
         settings['max_waveform_frequency'] = \
             self.control_board.max_waveform_frequency
         schema_entries.append(
-            Float.named('max_waveform_frequency').using(
-                default=settings['max_waveform_frequency'], optional=True,
-                validators=[ValueAtLeast(minimum=0), ]),
-        )
+            Float.named('max_waveform_frequency')
+            .using(default=settings['max_waveform_frequency'], optional=True,
+                   validators=[ValueAtLeast(minimum=0)]))
         if hardware_version.major == 1:
             settings['WAVEOUT_GAIN_1'] = self.control_board.waveout_gain_1
             schema_entries.append(
-                Integer.named('WAVEOUT_GAIN_1').using(
-                    default=settings['WAVEOUT_GAIN_1'], optional=True,
-                    validators=[ValueAtLeast(minimum=0),
-                                ValueAtMost(maximum=255), ]),
-            )
+                Integer.named('WAVEOUT_GAIN_1')
+                .using(default=settings['WAVEOUT_GAIN_1'], optional=True,
+                       validators=[ValueAtLeast(minimum=0),
+                                   ValueAtMost(maximum=255)]))
             settings['VGND'] = self.control_board.vgnd
             schema_entries.append(
-                Integer.named('VGND').using(
-                    default=settings['VGND'], optional=True,
-                    validators=[ValueAtLeast(minimum=0),
-                                ValueAtMost(maximum=255), ]),
-            )
+                Integer.named('VGND')
+                .using(default=settings['VGND'], optional=True,
+                       validators=[ValueAtLeast(minimum=0),
+                                   ValueAtMost(maximum=255)]))
         else:
-            settings['SWITCHING_BOARD_I2C_ADDRESS'] = (
-                self.control_board.switching_board_i2c_address)
+            settings['SWITCHING_BOARD_I2C_ADDRESS'] = \
+                self.control_board.switching_board_i2c_address
             schema_entries.append(
-                Integer.named('SWITCHING_BOARD_I2C_ADDRESS').using(
-                    default=settings['SWITCHING_BOARD_I2C_ADDRESS'],
-                    optional=True, validators=[ValueAtLeast(minimum=0),
-                                               ValueAtMost(maximum=255), ]),
-            )
+                Integer.named('SWITCHING_BOARD_I2C_ADDRESS')
+                .using(default=settings['SWITCHING_BOARD_I2C_ADDRESS'],
+                       optional=True, validators=[ValueAtLeast(minimum=0),
+                                                  ValueAtMost(maximum=255)]))
             settings['SIGNAL_GENERATOR_BOARD_I2C_ADDRESS'] = (
                 self.control_board.signal_generator_board_i2c_address)
             schema_entries.append(
-                Integer.named('SIGNAL_GENERATOR_BOARD_I2C_ADDRESS').using(
-                    default=settings['SIGNAL_GENERATOR_BOARD_I2C_ADDRESS'],
-                    optional=True, validators=[ValueAtLeast(minimum=0),
-                                               ValueAtMost(maximum=255), ]),
-            )
+                Integer.named('SIGNAL_GENERATOR_BOARD_I2C_ADDRESS')
+                .using(default=settings['SIGNAL_GENERATOR_BOARD_I2C_ADDRESS'],
+                       optional=True, validators=[ValueAtLeast(minimum=0),
+                                                  ValueAtMost(maximum=255)]))
         for i in range(len(self.control_board.calibration.R_hv)):
             settings['R_hv_%d' % i] = self.control_board.calibration.R_hv[i]
             schema_entries.append(
-                Float.named('R_hv_%d' % i).using(
-                    default=settings['R_hv_%d' % i], optional=True,
-                    validators=[ValueAtLeast(minimum=0), ]))
+                Float.named('R_hv_%d' % i)
+                .using(default=settings['R_hv_%d' % i], optional=True,
+                       validators=[ValueAtLeast(minimum=0)]))
             settings['C_hv_%d' % i] = (self.control_board.calibration.C_hv[i] *
                                        1e12)
             schema_entries.append(
-                Float.named('C_hv_%d' % i).using(
-                    default=settings['C_hv_%d' % i], optional=True,
-                    validators=[ValueAtLeast(minimum=0), ]))
+                Float.named('C_hv_%d' % i)
+                .using(default=settings['C_hv_%d' % i], optional=True,
+                       validators=[ValueAtLeast(minimum=0)]))
         for i in range(len(self.control_board.calibration.R_fb)):
             settings['R_fb_%d' % i] = self.control_board.calibration.R_fb[i]
             schema_entries.append(
-                Float.named('R_fb_%d' % i).using(
-                    default=settings['R_fb_%d' % i], optional=True,
-                    validators=[ValueAtLeast(minimum=0), ]))
+                Float.named('R_fb_%d' % i)
+                .using(default=settings['R_fb_%d' % i], optional=True,
+                       validators=[ValueAtLeast(minimum=0)]))
             settings['C_fb_%d' % i] = (self.control_board.calibration.C_fb[i] *
                                        1e12)
             schema_entries.append(
-                Float.named('C_fb_%d' % i).using(
-                    default=settings['C_fb_%d' % i], optional=True,
-                    validators=[ValueAtLeast(minimum=0), ]))
+                Float.named('C_fb_%d' % i)
+                .using(default=settings['C_fb_%d' % i], optional=True,
+                       validators=[ValueAtLeast(minimum=0)]))
 
         form = Form.of(*schema_entries)
-        dialog = FormViewDialog(form, 'Edit configuration settings')
-        valid, response = dialog.run()
-        if valid:
-            for k, v in response.items():
-                if settings[k] != v:
-                    m = re.match('(R|C)_(hv|fb)_(\d)', k)
-                    if k == 'amplifier_gain':
-                        self.control_board.amplifier_gain = v
-                    elif k == 'auto_adjust_amplifier_gain':
-                        self.control_board.auto_adjust_amplifier_gain = v
-                    elif k == 'WAVEOUT_GAIN_1':
-                        self.control_board.waveout_gain_1 = v
-                    elif k == 'VGND':
-                        self.control_board.vgnd = v
-                    elif k == 'SWITCHING_BOARD_I2C_ADDRESS':
-                        self.control_board.switching_board_i2c_address = v
-                    elif k == 'SIGNAL_GENERATOR_BOARD_I2C_ADDRESS':
-                        self.control_board\
-                            .signal_generator_board_i2c_address = v
-                    elif k == 'voltage_tolerance':
-                        self.control_board.voltage_tolerance = v
-                    elif k == 'use_antialiasing_filter':
-                        self.control_board.use_antialiasing_filter = v
-                    elif k == 'max_waveform_voltage':
-                        self.control_board.max_waveform_voltage = v
-                    elif k == 'min_waveform_frequency':
-                        self.control_board.min_waveform_frequency = v
-                    elif k == 'max_waveform_frequency':
-                        self.control_board.max_waveform_frequency = v
-                    elif m:
-                        series_resistor = int(m.group(3))
-                        if m.group(2) == 'hv':
-                            channel = 0
-                        else:
-                            channel = 1
-                        if m.group(1) == 'R':
-                            self.control_board.set_series_resistance(
-                                channel, v, resistor_index=series_resistor)
-                        else:
-                            if v is None:
-                                v = 0
-                            self.control_board.set_series_capacitance(
-                                channel, v / 1e12,
-                                resistor_index=series_resistor)
-            if get_app().protocol:
-                self.on_step_run()
+
+        @gtk_threadsafe
+        def _edit_config_dialog():
+            dialog = FormViewDialog(form, 'Edit configuration settings')
+            valid, response = dialog.run()
+            if valid:
+                for k, v in response.items():
+                    if settings[k] != v:
+                        m = re.match('(R|C)_(hv|fb)_(\d)', k)
+                        if k == 'amplifier_gain':
+                            self.control_board.amplifier_gain = v
+                        elif k == 'auto_adjust_amplifier_gain':
+                            self.control_board.auto_adjust_amplifier_gain = v
+                        elif k == 'WAVEOUT_GAIN_1':
+                            self.control_board.waveout_gain_1 = v
+                        elif k == 'VGND':
+                            self.control_board.vgnd = v
+                        elif k == 'SWITCHING_BOARD_I2C_ADDRESS':
+                            self.control_board.switching_board_i2c_address = v
+                        elif k == 'SIGNAL_GENERATOR_BOARD_I2C_ADDRESS':
+                            self.control_board\
+                                .signal_generator_board_i2c_address = v
+                        elif k == 'voltage_tolerance':
+                            self.control_board.voltage_tolerance = v
+                        elif k == 'use_antialiasing_filter':
+                            self.control_board.use_antialiasing_filter = v
+                        elif k == 'max_waveform_voltage':
+                            self.control_board.max_waveform_voltage = v
+                        elif k == 'min_waveform_frequency':
+                            self.control_board.min_waveform_frequency = v
+                        elif k == 'max_waveform_frequency':
+                            self.control_board.max_waveform_frequency = v
+                        elif m:
+                            series_resistor = int(m.group(3))
+                            if m.group(2) == 'hv':
+                                channel = 0
+                            else:
+                                channel = 1
+                            if m.group(1) == 'R':
+                                self.control_board.set_series_resistance(
+                                    channel, v, resistor_index=series_resistor)
+                            else:
+                                if v is None:
+                                    v = 0
+                                self.control_board.set_series_capacitance(
+                                    channel, v / 1e12,
+                                    resistor_index=series_resistor)
+                if get_app().protocol:
+                    self.on_step_run()
+        _edit_config_dialog()
 
     def on_reset_configuration_to_default_values(self, widget=None, data=None):
         self.control_board.reset_config_to_defaults()
 
     def update_connection_status(self):
+        '''
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code, ensuring the
+            code runs in the main GTK thread.
+        '''
         self.connection_status = "Not connected"
         app = get_app()
         connected = self.control_board.connected()
@@ -1163,28 +1231,41 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                       'channels' % (name, version, firmware,
                                                     serial_number, n_channels))
 
-        # Enable/disable control board menu items based on the connection
-        # status of the control board.
-        apply_dict_depth_first(self.menu_items,
-                               lambda key, node, parents, *args:
-                               node.item[0].set_sensitive(connected))
+        @gtk_threadsafe
+        def _update_ui_connected_status():
+            # Enable/disable control board menu items based on the connection
+            # status of the control board.
+            apply_dict_depth_first(self.menu_items, lambda key, node, parents,
+                                   *args:
+                                   node.item[0].set_sensitive(connected))
 
-        app.main_window_controller.label_control_board_status\
-           .set_text(self.connection_status)
+            app.main_window_controller.label_control_board_status\
+            .set_text(self.connection_status)
+        _update_ui_connected_status()
 
     def on_device_impedance_update(self, results):
+        '''
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code, ensuring the
+            code runs in the main GTK thread.
+        '''
         app = get_app()
-        label = (self.connection_status + ', Voltage: %.1f V' %
-                 results.V_actuation()[-1])
 
-        # add normalized force to the label if we've calibrated the device
-        if results.calibration._c_drop:
-            label += (u'\nForce: %.1f \u03BCN/mm (c<sub>device</sub>='
-                      u'%.1f pF/mm<sup>2</sup>)' %
-                      (np.mean(1e6 * results.force(Ly=1.0)), 1e12 *
-                       results.calibration.c_drop(results.frequency)))
+        @gtk_threadsafe
+        def _update_ui_impedance():
+            label = (self.connection_status + ', Voltage: %.1f V' %
+                     results.V_actuation()[-1])
 
-        app.main_window_controller.label_control_board_status.set_markup(label)
+            # add normalized force to the label if we've calibrated the device
+            if results.calibration._c_drop:
+                label += (u'\nForce: %.1f \u03BCN/mm (c<sub>device</sub>='
+                        u'%.1f pF/mm<sup>2</sup>)' %
+                        (np.mean(1e6 * results.force(Ly=1.0)), 1e12 *
+                        results.calibration.c_drop(results.frequency)))
+
+            app.main_window_controller.label_control_board_status\
+                .set_markup(label)
+        _update_ui_impedance()
 
         options = self.get_step_options()
 
