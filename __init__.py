@@ -603,9 +603,11 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             menu['Edit settings'][0].connect('activate',
                                              self.on_edit_configuration)
             menu['Save to file'][0].connect('activate',
-                                            lambda *a: self.save_config())
+                                            lambda *a:
+                                            self.save_config_dialog())
             menu['Load from file'][0].connect('activate',
-                                              lambda *a: self.load_config())
+                                              lambda *a:
+                                              self.load_config_dialog())
             menu['Reset to default values'][0].connect(
                 'activate', self.on_reset_configuration_to_default_values)
 
@@ -866,20 +868,23 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             logger.error("Problem flashing firmware. ""%s" % why)
         self.check_device_name_and_version()
 
-    def load_config(self):
+    def load_config_dialog(self):
         '''
-        ## `load_config` ##
-
         Load control-board device configuration from file, including values set
-        during [calibration][1], and write the configuration to the control
+        during calibration_, and write the configuration to the control
         board.
 
-        ## Note ##
+        .. note::
 
-        The behaviour of this method is described in [ticket #41][2].
+        The behaviour of this method is described in `ticket #41`__.
 
-        [1]: http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20calibration
-        [2]: http://microfluidics.utoronto.ca/trac/dropbot/ticket/41
+        .. versionchanged:: 2.3.3
+            Rename from :meth:`load_config` to :meth:`load_config_dialog` to
+            emphasize that this method includes GTK code and **MUST** be
+            executed within the main GTK thread.
+
+        __ http://microfluidics.utoronto.ca/trac/dropbot/ticket/41
+        .. _calibration: http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20calibration
         '''
         dialog = gtk.FileChooserDialog(
             title="Load control board configuration from file",
@@ -910,28 +915,27 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 logger.info(message)
                 info_dialog(message)
 
-    def save_config(self):
+    def save_config_dialog(self):
         '''
-        ## `save_config` ##
-
         Save control-board device configuration, including values set during
-        [calibration][1].
+        calibration_.
 
-        ## Note ##
+        .. note::
+            The behaviour of this method is described in `ticket #41`__.
 
-        The behaviour of this method is described in [ticket #41][2].
+        .. versionchanged:: 2.3.3
+            Rename from :meth:`save_config` to :meth:`save_config_dialog` to
+            emphasize that this method includes GTK code and **MUST** be
+            executed within the main GTK thread.
 
-        [1]: http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20calibration
-        [2]: http://microfluidics.utoronto.ca/trac/dropbot/ticket/41
+        __ http://microfluidics.utoronto.ca/trac/dropbot/ticket/41
+        .. _calibration: http://microfluidics.utoronto.ca/trac/dropbot/wiki/Control%20board%20calibration
         '''
         dialog = gtk.FileChooserDialog(
             title="Save control board configuration to file",
             action=gtk.FILE_CHOOSER_ACTION_SAVE,
-            buttons=(gtk.STOCK_CANCEL,
-                     gtk.RESPONSE_CANCEL,
-                     gtk.STOCK_OPEN,
-                     gtk.RESPONSE_OK)
-        )
+            buttons=(gtk.STOCK_CANCEL, gtk.RESPONSE_CANCEL, gtk.STOCK_OPEN,
+                     gtk.RESPONSE_OK))
         dialog.set_default_response(gtk.RESPONSE_OK)
         dialog.set_current_folder(self.configurations_dir())
         dialog.set_current_name(self._file_prefix() + 'config.yml')
@@ -941,7 +945,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
         if response == gtk.RESPONSE_OK:
             if filename.isfile():
-                response = yesno('File exists. Would you like to overwrite it?')
+                response = yesno('File exists. Would you like to overwrite '
+                                 'it?')
                 if response != gtk.RESPONSE_YES:
                     return
             self.to_yaml(filename)
