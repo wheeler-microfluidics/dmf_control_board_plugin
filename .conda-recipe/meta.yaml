@@ -22,7 +22,7 @@ requirements:
     - dmf-control-board-firmware >=1.5.0
     - flatland-fork
     - microdrop >=2.4
-    - microdrop-plugin-manager >=0.11
+    - microdrop-plugin-manager >=0.14
     - nested-structures
     - path_helpers >=0.2.post3
     - pytables >=3.2.2
@@ -35,7 +35,7 @@ requirements:
     - dmf-control-board-firmware >=1.5.0
     - flatland-fork
     - microdrop >=2.4
-    - microdrop-plugin-manager >=0.11
+    - microdrop-plugin-manager >=0.14
     - nested-structures
     - path_helpers >=0.2.post3
     - pytables >=3.2.2
@@ -44,7 +44,7 @@ requirements:
 
 test:
   commands:
-    - python -c "import importlib; import mpm.api; import os; import sys; sys.path.insert(0, mpm.api.MICRODROP_CONDA_SHARE.joinpath('plugins', 'available')); importlib.import_module(os.environ.get('PKG_NAME'))"
+    - python -m mpm.bin.import_test -a {{ PKG_NAME }}
 
 about:
   home: http://github.com/wheeler-microfluidics/dmf_control_board_plugin
