@@ -434,7 +434,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     )
     _feedback_fields = set(['feedback_enabled'])
 
-    version = get_plugin_info(path(__file__).parent).version
+    version = __version__
 
     def __init__(self):
         '''
