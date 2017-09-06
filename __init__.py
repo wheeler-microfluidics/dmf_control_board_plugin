@@ -58,10 +58,13 @@ import tables
 import yaml
 import zmq
 
+from ._version import get_versions
 from .wizards import MicrodropChannelsAssistantView
 
-logger = logging.getLogger(__name__)
+__version__ = get_versions()['version']
+del get_versions
 
+logger = logging.getLogger(__name__)
 
 # Ignore natural name warnings from PyTables [1].
 #
@@ -95,8 +98,8 @@ class DmfZmqPlugin(ZmqPlugin):
         try:
             msg_frames = self.subscribe_socket.recv_multipart(zmq.NOBLOCK)
             source, target, msg_type, msg_json = msg_frames
-            if ((source == 'microdrop.electrode_controller_plugin') and
-                (msg_type == 'execute_reply')):
+            if all([source == 'microdrop.electrode_controller_plugin',
+                    msg_type == 'execute_reply']):
                 # The 'electrode_controller_plugin' plugin maintains the
                 # requested state of each electrode.
                 msg = json.loads(msg_json)
@@ -130,7 +133,7 @@ class DmfZmqPlugin(ZmqPlugin):
                 self.most_recent = msg_json
         except zmq.Again:
             pass
-        except:
+        except Exception:
             logger.error('Error processing message from subscription '
                          'socket.', exc_info=True)
         return True
@@ -224,9 +227,11 @@ class DmfZmqPlugin(ZmqPlugin):
 def microdrop_experiment_log_to_feedback_results_df(log):
     # get the FeedbackResults object for each step
     results = log.get('FeedbackResults',
-                      plugin_name=get_plugin_info(path(__file__).parent).plugin_name)
+                      plugin_name=get_plugin_info(path(__file__).parent)
+                      .plugin_name)
 
-    # get the start time for each step (in seconds), relative to the beginning of the protocol
+    # Get the start time for each step (in seconds), relative to the beginning
+    # of the protocol.
     step_start_time = log.get('time')
 
     start_time = arrow.get(log.get('start time')[0])
@@ -333,12 +338,8 @@ class DMFControlBoardOptions(object):
 
 def format_func(value):
     if value:
-        # Green
-        #return '#00FF00'
         return True
     else:
-        # Yellow
-        #return '#FFFF00'
         return False
 
 
@@ -347,8 +348,9 @@ def max_voltage(element, state):
     service = get_service_instance_by_name(
         get_plugin_info(path(__file__).parent).plugin_name)
 
-    if service.control_board.connected() and \
-        element.value > service.control_board.max_waveform_voltage:
+    if service.control_board.connected() and (element.value >
+                                              service.control_board
+                                              .max_waveform_voltage):
         return element.errors.append('Voltage exceeds the maximum value '
                                      '(%d V).' %
                                      service.control_board.max_waveform_voltage)
@@ -361,14 +363,18 @@ def check_frequency(element, state):
     service = get_service_instance_by_name(
         get_plugin_info(path(__file__).parent).plugin_name)
 
-    if service.control_board.connected() and \
-        (element.value < service.control_board.min_waveform_frequency or \
-        element.value > service.control_board.max_waveform_frequency):
+    if service.control_board.connected() and (element.value <
+                                              service.control_board
+                                              .min_waveform_frequency
+                                              or element.value >
+                                              service.control_board
+                                              .max_waveform_frequency):
         return element.errors.append('Frequency is outside of the valid range '
-            '(%.1f - %.1f Hz).' %
-            (service.control_board.min_waveform_frequency,
-             service.control_board.max_waveform_frequency)
-        )
+                                     '(%.1f - %.1f Hz).' %
+                                     (service.control_board
+                                      .min_waveform_frequency,
+                                      service.control_board
+                                      .max_waveform_frequency))
     else:
         return True
 
@@ -386,11 +392,11 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         comports = dmf.serial_ports().index.tolist()
         default_port = comports[0] if comports else None
         return Form.of(Integer.named('sampling_window_ms')
-                       .using(default=5, optional=True, validators=
-                              [ValueAtLeast(minimum=0), ],),
+                       .using(default=5, optional=True,
+                              validators=[ValueAtLeast(minimum=0)]),
                        Integer.named('delay_between_windows_ms')
                        .using(default=0, optional=True,
-                              validators=[ValueAtLeast(minimum=0), ],),
+                              validators=[ValueAtLeast(minimum=0)]),
                        Boolean.named('use_rms').using(default=True,
                                                       optional=True),
                        Boolean.named('interleave_feedback_samples')
@@ -400,7 +406,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                        .valued(*comports),
                        Integer.named('baud_rate')
                        .using(default=115200, optional=True,
-                              validators=[ValueAtLeast(minimum=0), ],),
+                              validators=[ValueAtLeast(minimum=0)]),
                        Boolean.named('auto_atx_power_off')
                        .using(default=False, optional=True),
                        Boolean.named('use_force_normalization')
@@ -414,13 +420,12 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
     StepFields = Form.of(
         Integer.named('duration').using(default=100, optional=True,
-                                        validators=
-                                        [ValueAtLeast(minimum=0), ]),
+                                        validators=[ValueAtLeast(minimum=0)]),
         Float.named('voltage').using(default=100, optional=True,
                                      validators=[ValueAtLeast(minimum=0),
                                                  max_voltage]),
         Float.named('force').using(default=25, optional=True,
-                                   validators=[ValueAtLeast(minimum=0),]),
+                                   validators=[ValueAtLeast(minimum=0)]),
         Float.named('frequency').using(default=10e3, optional=True,
                                        validators=[ValueAtLeast(minimum=0),
                                                    check_frequency]),
@@ -582,6 +587,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                 same run share a common value in the `timestamp` column.
                 '''
                 view = MicrodropChannelsAssistantView(self.control_board)
+
                 def on_close(*args):
                     view.to_hdf(self.calibrations_dir()
                                 .joinpath('[%05d]-channels.h5' %
@@ -669,10 +675,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                          .calibration._c_drop):
                         for i, step in enumerate(app.protocol):
                             options = self.get_step_options(i)
-                            options.voltage = self.control_board.force_to_voltage(
-                                options.force,
-                                options.frequency
-                            )
+                            options.voltage = \
+                                self.control_board.force_to_voltage(
+                                    options.force, options.frequency)
                 else:
                     if 'force' in pgc.enabled_fields[self.name]:
                         pgc.enabled_fields[self.name].remove('force')
@@ -768,8 +773,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         self._update_watchdog(app_values['auto_atx_power_off'])
 
     def _update_watchdog(self, enabled):
-        if enabled:
-            try:
+        try:
+            if enabled:
                 # Try to enable watchdog-timer to shut off power supply when
                 # the `Microdrop` app is closed.
                 self.control_board.watchdog_state = True
@@ -778,20 +783,17 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                     self.watchdog_timeout_id = gobject.timeout_add(
                         2000,  # Trigger every 2 seconds.
                         self._callback_reset_watchdog)
-            except: # earlier versions of the firmware may not accept this
-                    # command, so we need to catch any exceptions
-                pass
-        else:
-            try:
+            else:
                 # Try to disable the watchdog-timer
                 self.control_board.watchdog_enabled = False
                 # Kill any running timer
                 if self.watchdog_timeout_id:
                     gobject.source_remove(self.watchdog_timeout_id)
                     self.watchdog_timeout_id = None
-            except: # earlier versions of the firmware may not accept this
-                    # command, so we need to catch any exceptions
-                pass
+        except Exception:
+            # earlier versions of the firmware may not accept this command,
+            # so we need to catch any exceptions
+            pass
 
     def _callback_reset_watchdog(self):
         # only reset the watchdog if we are connected and not waiting for a
@@ -896,7 +898,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         if response == gtk.RESPONSE_OK:
             try:
                 config = yaml.load(filename.bytes())
-            except:
+            except Exception:
                 logger.error('Error parsing control-board configuration '
                              'file.\n\n'
                              'Please ensure the configuration file is a valid'
@@ -949,8 +951,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         Write control board configuration to a YAML output file.
         '''
         config = self.control_board.read_config()
-        config = dict([(k, v) for k, v in config.iteritems()
-                        if v is not None])
+        config = dict([(k, v) for k, v in config.iteritems() if v is not None])
         for k in config.keys():
             # Yaml doesn't support serializing numpy scalar types, but the
             # configuration returned by `read_config` may contain numpy
@@ -1153,9 +1154,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             firmware = self.control_board.software_version()
             n_channels = self.control_board.number_of_channels()
             serial_number = self.control_board.serial_number
-            self.connection_status = ('%s v%s (Firmware: %s, S/N %03d)\n'
-            '%d channels' % (name, version, firmware, serial_number,
-                             n_channels))
+            self.connection_status = ('%s v%s (Firmware: %s, S/N %03d)\n%d '
+                                      'channels' % (name, version, firmware,
+                                                    serial_number, n_channels))
 
         # Enable/disable control board menu items based on the connection
         # status of the control board.
@@ -1175,8 +1176,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         if results.calibration._c_drop:
             label += (u'\nForce: %.1f \u03BCN/mm (c<sub>device</sub>='
                       u'%.1f pF/mm<sup>2</sup>)' %
-                      (np.mean(1e6 * results.force(Ly=1.0)),
-                      1e12*results.calibration.c_drop(results.frequency)))
+                      (np.mean(1e6 * results.force(Ly=1.0)), 1e12 *
+                       results.calibration.c_drop(results.frequency)))
 
         app.main_window_controller.label_control_board_status.set_markup(label)
 
@@ -1271,10 +1272,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                         attempt = app.protocol.current_step_attempt
                         if attempt <= feedback_options.action.max_repeats:
                             frequency = options.frequency
-                            if (app_values['use_force_normalization'] and
-                                self.control_board.calibration and
-                                self.control_board.calibration._c_drop
-                            ):
+                            if app_values['use_force_normalization'] and \
+                                (self.control_board.calibration and
+                                 self.control_board.calibration._c_drop):
                                 voltage = self.control_board.force_to_voltage(
                                     options.force +
                                     feedback_options.action.increase_force *
@@ -1283,9 +1283,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                 )
                             else:
                                 voltage = (options.voltage +
-                                    feedback_options.action.increase_voltage *
-                                    attempt
-                                )
+                                           feedback_options.action
+                                           .increase_voltage * attempt)
                             emit_signal("set_voltage", voltage,
                                         interface=IWaveformGenerator)
                             if frequency != self.current_frequency:
@@ -1294,9 +1293,10 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                 self.check_impedance(options)
                             self.measure_impedance_non_blocking(
                                 app_values['sampling_window_ms'],
-                                int(math.ceil(options.duration / (
-                                              app_values['sampling_window_ms'] +
-                                              app_values['delay_between_windows_ms']))),
+                                int(math.ceil(options.duration /
+                                              (app_values['sampling_window_ms']
+                                               + app_values
+                                               ['delay_between_windows_ms']))),
                                 app_values['delay_between_windows_ms'],
                                 app_values['interleave_feedback_samples'],
                                 app_values['use_rms'],
@@ -1392,8 +1392,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
     def get_measure_impedance_data(self):
         """
-        This function wraps the control_board.get_measure_impedance_data() function and
-        adds the actuated area.
+        This function wraps the control_board.get_measure_impedance_data()
+        function and adds the actuated area.
         """
         results = self.control_board.get_measure_impedance_data()
         results.area = self.get_actuated_area()
@@ -1422,7 +1422,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app.experiment_log.add_data({"FeedbackResults": results}, self.name)
 
         normalized_capacitance = np.ma.masked_invalid(results.capacitance() /
-            area)
+                                                      area)
 
         if (self.control_board.calibration._c_drop and
                 np.max(normalized_capacitance) <
@@ -1473,7 +1473,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             self.measure_impedance_non_blocking(
                 app_values['sampling_window_ms'],
                 int(math.ceil(options.duration /
-                              (app_values['sampling_window_ms'] + \
+                              (app_values['sampling_window_ms'] +
                                app_values['delay_between_windows_ms']))),
                 app_values['delay_between_windows_ms'],
                 app_values['interleave_feedback_samples'],
@@ -1518,7 +1518,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             self.measure_impedance_non_blocking(
                 app_values['sampling_window_ms'],
                 int(math.ceil(options.duration /
-                              (app_values['sampling_window_ms'] + \
+                              (app_values['sampling_window_ms'] +
                                app_values['delay_between_windows_ms']))),
                 app_values['delay_between_windows_ms'],
                 app_values['interleave_feedback_samples'],
@@ -1621,7 +1621,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             self.measure_impedance(
                 app_values['sampling_window_ms'],
                 int(math.ceil(test_options.duration /
-                              (app_values['sampling_window_ms'] + \
+                              (app_values['sampling_window_ms'] +
                                delay_between_windows_ms))),
                 delay_between_windows_ms,
                 app_values['interleave_feedback_samples'],
@@ -1651,17 +1651,19 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         # samples
         if n_sampling_windows > n_sampling_windows_max:
             logger.info('[DMFControlBoardPlugin] _check_n_sampling_windows():'
-                        ' n_sampling_windows=%d > %d' % (n_sampling_windows,
-                        n_sampling_windows_max))
+                        ' n_sampling_windows=%d > %d' %
+                        (n_sampling_windows, n_sampling_windows_max))
             duration = (sampling_window_ms + delay_between_windows_ms) * \
                 n_sampling_windows
-            delay_between_windows_ms = math.ceil(float(duration) / \
-                n_sampling_windows_max - sampling_window_ms)
-            n_sampling_windows = int(math.floor(duration / \
-                (sampling_window_ms + delay_between_windows_ms)))
+            delay_between_windows_ms = math.ceil(float(duration) /
+                                                 n_sampling_windows_max -
+                                                 sampling_window_ms)
+            n_sampling_windows = int(math.floor(duration /
+                                                (sampling_window_ms +
+                                                 delay_between_windows_ms)))
             logger.info('[DMFControlBoardPlugin] _check_n_sampling_windows():'
-                        ' delay_between_windows_ms=%d, n_sampling_windows=%d' %
-                        (delay_between_windows_ms, n_sampling_windows))
+                        ' delay_between_windows_ms=%d, n_sampling_windows=%d',
+                        delay_between_windows_ms, n_sampling_windows)
             return n_sampling_windows, delay_between_windows_ms
         return n_sampling_windows, delay_between_windows_ms
 
@@ -1756,7 +1758,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
     def get_step_value(self, name, step_number=None):
         app = get_app()
-        if not name in self.StepFields.field_schema_mapping:
+        if name not in self.StepFields.field_schema_mapping:
             raise KeyError('No field with name %s for plugin %s' % (name,
                                                                     self.name))
         if step_number is None:
@@ -1771,9 +1773,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         app = get_app()
         app_values = self.get_app_values()
         options = self.get_step_options()
-        if (app_values['use_force_normalization'] and
-            self.control_board.calibration is not None and
-            self.control_board.calibration._c_drop):
+        if app_values['use_force_normalization'] and \
+            (self.control_board.calibration is not None and
+             self.control_board.calibration._c_drop):
             options.voltage = self.control_board.force_to_voltage(
                 options.force,
                 options.frequency)
@@ -1782,8 +1784,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
              .on_step_options_changed(plugin, step_number))
         if app.protocol and (not app.running and app.realtime_mode and
                              app.protocol.current_step_number == step_number
-                             and plugin in
-							 (self.name, )):
+                             and plugin == self.name):
             self.on_step_run()
 
     def on_step_swapped(self, original_step_number, new_step_number):
@@ -1815,13 +1816,15 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             # add info about the devices on the i2c bus
             try:
                 data["i2c devices"] = (self.control_board._i2c_devices)
-            except:
+            except Exception:
                 pass
         log.add_data(data)
 
     def on_export_experiment_log_data(self, log):
-        feedback_results_df = microdrop_experiment_log_to_feedback_results_df(log)
-        step_summary_df = feedback_results_df_to_step_summary_df(feedback_results_df)
+        feedback_results_df = \
+            microdrop_experiment_log_to_feedback_results_df(log)
+        step_summary_df =\
+            feedback_results_df_to_step_summary_df(feedback_results_df)
         data = {}
         data['feedback results'] = feedback_results_df
         data['step summary'] = step_summary_df
@@ -1868,7 +1871,3 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
 
 
 PluginGlobals.pop_env()
-
-from ._version import get_versions
-__version__ = get_versions()['version']
-del get_versions
