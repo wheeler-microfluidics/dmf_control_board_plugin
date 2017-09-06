@@ -4,7 +4,9 @@ source:
   git_url: ../
 
 package:
-  name: dmf_control_board_plugin
+  # .. versionchanged:: 2.3.4
+  #     Replace underscores with `-` and add `microdrop.` prefix
+  name: microdrop.dmf-control-board-plugin
 {% if GIT_DESCRIBE_NUMBER > '0' %}
   version: {{ GIT_DESCRIBE_TAG[1:] }}.post{{ GIT_DESCRIBE_NUMBER }}
 {% else %}

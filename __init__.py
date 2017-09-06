@@ -434,13 +434,16 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
     )
     _feedback_fields = set(['feedback_enabled'])
 
-    version = get_plugin_info(path(__file__).parent).version
+    version = __version__
 
     def __init__(self):
         '''
         .. versionchanged:: 2.3.3
             Use :func:`gtk_threadsafe` decorator to wrap GTK code blocks,
             ensuring the code runs in the main GTK thread.
+
+        .. versionchanged:: 2.3.4
+            Use :data:`__version__` for plugin version.
         '''
         self.control_board = DMFControlBoard()
         self.name = get_plugin_info(path(__file__).parent).plugin_name
