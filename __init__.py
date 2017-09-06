@@ -1,5 +1,5 @@
 """
-Copyright 2011-2016 Ryan Fobel and Christian Fobel
+Copyright 2011-2017 Ryan Fobel and Christian Fobel
 
 This file is part of dmf_control_board.
 
@@ -1240,7 +1240,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
                                    node.item[0].set_sensitive(connected))
 
             app.main_window_controller.label_control_board_status\
-            .set_text(self.connection_status)
+                .set_text(self.connection_status)
         _update_ui_connected_status()
 
     def on_device_impedance_update(self, results):
@@ -1259,9 +1259,9 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             # add normalized force to the label if we've calibrated the device
             if results.calibration._c_drop:
                 label += (u'\nForce: %.1f \u03BCN/mm (c<sub>device</sub>='
-                        u'%.1f pF/mm<sup>2</sup>)' %
-                        (np.mean(1e6 * results.force(Ly=1.0)), 1e12 *
-                        results.calibration.c_drop(results.frequency)))
+                          u'%.1f pF/mm<sup>2</sup>)' %
+                          (np.mean(1e6 * results.force(Ly=1.0)), 1e12 *
+                           results.calibration.c_drop(results.frequency)))
 
             app.main_window_controller.label_control_board_status\
                 .set_markup(label)
@@ -1273,9 +1273,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         logger.info('[DMFControlBoardPlugin]'
                     '.on_device_impedance_update():')
         logger.info('\tset_voltage=%.1f, measured_voltage=%.1f, '
-                    'error=%.1f%%' % (voltage, results.V_actuation()[-1],
-                                      100 * (results.V_actuation()[-1] -
-                                             voltage) / voltage))
+                    'error=%.1f%%', voltage, results.V_actuation()[-1], 100 *
+                    (results.V_actuation()[-1] - voltage) / voltage)
 
         # check that the signal is within tolerance
         if (abs(results.V_actuation()[-1] - voltage) >
@@ -1295,7 +1294,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
             if (self.control_board.auto_adjust_amplifier_gain and
                     self.n_voltage_adjustments is not None and
                     self.n_voltage_adjustments < 5):
-                logger.info('\tn_voltage_adjustments=%d' %
+                logger.info('\tn_voltage_adjustments=%d',
                             self.n_voltage_adjustments)
                 emit_signal("set_voltage", voltage,
                             interface=IWaveformGenerator)
@@ -1311,7 +1310,7 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         if (self.control_board.auto_adjust_amplifier_gain and not
                 self.amplifier_gain_initialized):
             self.amplifier_gain_initialized = True
-            logger.info('Amplifier gain initialized (gain=%.1f)' %
+            logger.info('Amplifier gain initialized (gain=%.1f)',
                         self.control_board.amplifier_gain)
 
     def get_actuated_area(self):
@@ -1700,8 +1699,8 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         test_options = deepcopy(options)
         # take 5 samples to allow signal/gain to stabilize
         test_options.duration = app_values['sampling_window_ms'] * 5
-        test_options.feedback_options = FeedbackOptions(
-            feedback_enabled=True, action=RetryAction())
+        test_options.feedback_options = FeedbackOptions(feedback_enabled=True,
+                                                        action=RetryAction())
         delay_between_windows_ms = 0
         results = \
             self.measure_impedance(
@@ -1937,16 +1936,16 @@ class DMFControlBoardPlugin(Plugin, StepOptionsController, AppDataController):
         return []
 
     def configurations_dir(self):
-        directory = path(get_app().config['data_dir']). \
-            joinpath('configurations')
-        logger.debug('calibrations_dir=%s' % directory)
+        directory = path(get_app().config['data_dir']) \
+            .joinpath('configurations')
+        logger.debug('calibrations_dir=%s', directory)
         if not directory.isdir():
             directory.makedirs_p()
         return directory
 
     def calibrations_dir(self):
         directory = path(get_app().config['data_dir']).joinpath('calibrations')
-        logger.debug('calibrations_dir=%s' % directory)
+        logger.debug('calibrations_dir=%s', directory)
         if not directory.isdir():
             directory.makedirs_p()
         return directory

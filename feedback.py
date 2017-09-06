@@ -249,8 +249,8 @@ class FeedbackOptions():
     @classmethod
     def from_dict(cls, options_dict):
         action = RetryAction(**options_dict['action'])
-        return FeedbackOptions(feedback_enabled=
-                               options_dict['feedback_enabled'], action=action)
+        return FeedbackOptions(feedback_enabled=options_dict
+                               ['feedback_enabled'], action=action)
 
 
 class FeedbackOptionsController():
@@ -308,19 +308,25 @@ class FeedbackOptionsController():
     def on_window_delete_event(self, widget, data=None):
         """
         Handler called when the user closes the "Feedback Options" window.
+
+        .. versionchanged:: 2.3.2
+            Schedule GTK call to run in the main GTK thread.
         """
-        self.window.hide()
+        gobject.idle_add(self.window.hide)
         return True
 
     def measure_cap_filler(self):
         '''
         Returns
         -------
+        dict
+            Calibration capacitance measurements data:
 
-            (dict) : The `'frequency'` item is a list of the frequencies
-                capacitance was measured at, and the `'capacitance'` item is a
-                list of the corresponding capacitance measurement at each
-                frequency.
+                frequency : list
+                    List of the frequencies capacitance was measured at.
+                capacitance : list
+                    List of the corresponding capacitance measurement at each
+                    frequency.
         '''
         c = self.measure_device_capacitance()
         self.plugin.control_board.calibration._c_filler = c
@@ -331,11 +337,14 @@ class FeedbackOptionsController():
         '''
         Returns
         -------
+        dict
+            Calibration capacitance measurements data:
 
-            (dict) : The `'frequency'` item is a list of the frequencies
-                capacitance was measured at, and the `'capacitance'` item is a
-                list of the corresponding capacitance measurement at each
-                frequency.
+                frequency : list
+                    List of the frequencies capacitance was measured at.
+                capacitance : list
+                    List of the corresponding capacitance measurement at each
+                    frequency.
         '''
         c = self.measure_device_capacitance()
         self.plugin.control_board.calibration._c_drop = c
@@ -355,8 +364,8 @@ class FeedbackOptionsController():
                 list of the corresponding capacitance measurement at each
                 frequency.
         '''
-        if (self.plugin.control_board is None or not
-            self.plugin.control_board.connected()):
+        if self.plugin.control_board is None or \
+                not self.plugin.control_board.connected():
             raise IOError('Not connected to control board.')
 
         app = get_app()
@@ -382,8 +391,7 @@ class FeedbackOptionsController():
         test_options = deepcopy(dmf_options)
         test_options.duration = 5 * app_values['sampling_window_ms']
         test_options.feedback_options = FeedbackOptions(
-            feedback_enabled=True, action=SweepFrequencyAction()
-        )
+            feedback_enabled=True, action=SweepFrequencyAction())
 
         results = FeedbackResultsSeries('Frequency')
         for frequency in np.logspace(
@@ -405,18 +413,15 @@ class FeedbackOptionsController():
             results.add_data(frequency, data)
             results.area = area
             capacitance = np.mean(data.capacitance())
-            logger.info('\tcapacitance = %e F (%e F/mm^2)' % (capacitance,
-                                                              capacitance /
-                                                              area))
+            logger.info('\tcapacitance = %e F (%e F/mm^2)', capacitance,
+                        capacitance / area)
 
         capacitance = np.mean(results.capacitance())
-        logger.info('mean(capacitance) = %e F (%e F/mm^2)' % (capacitance,
-                                                              capacitance /
-                                                              area))
+        logger.info('mean(capacitance) = %e F (%e F/mm^2)', capacitance,
+                    capacitance / area)
 
         # set the frequency back to it's original state
-        emit_signal("set_frequency",
-                    dmf_options.frequency,
+        emit_signal("set_frequency", dmf_options.frequency,
                     interface=IWaveformGenerator)
         self.plugin.check_impedance(dmf_options)
 
@@ -445,10 +450,9 @@ class FeedbackOptionsController():
     def _update_feedback_options(self, feedback_options):
         app = get_app()
         # copy the current step's feedback options to all selected steps
-        pgc = get_service_instance_by_name(
-            'microdrop.gui.protocol_grid_controller',
-            env='microdrop'
-        )
+        pgc = get_service_instance_by_name('microdrop.gui'
+                                           '.protocol_grid_controller',
+                                           env='microdrop')
         for step_number in pgc.widget.selected_ids:
             if step_number == app.protocol.current_step_number:
                 continue
@@ -546,10 +550,9 @@ class FeedbackOptionsController():
             self.builder.get_object("textentry_percent_threshold")\
                 .set_text(str(options.action.percent_threshold))
 
-            if (app_values['use_force_normalization'] and
-                self.plugin.control_board.calibration and
-                self.plugin.control_board.calibration._c_drop
-            ):
+            if app_values['use_force_normalization'] and \
+                (self.plugin.control_board.calibration and
+                 self.plugin.control_board.calibration._c_drop):
                 self.builder.get_object("textentry_increase_voltage")\
                     .set_text(str(options.action.increase_force))
             else:
@@ -679,8 +682,8 @@ class FeedbackOptionsController():
         Handler called when the "Retry until capacitance..." radio button is
         toggled.
         """
-        logger.debug('retry was toggled %s' % (('OFF',
-                                                'ON')[widget.get_active()]))
+        logger.debug('retry was toggled %s',
+                     ('OFF', 'ON')[widget.get_active()])
         app = get_app()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
@@ -704,8 +707,8 @@ class FeedbackOptionsController():
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
         sweep_frequency = widget.get_active()
-        if (sweep_frequency and options.action.__class__ !=
-                SweepFrequencyAction):
+        if sweep_frequency and (options.action.__class__ !=
+                                SweepFrequencyAction):
             options.action = SweepFrequencyAction()
         if sweep_frequency:
             self._update_feedback_options(options)
@@ -743,8 +746,8 @@ class FeedbackOptionsController():
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
         sweep_electrodes = widget.get_active()
-        if (sweep_electrodes and options.action.__class__ !=
-                SweepElectrodesAction):
+        if sweep_electrodes and (options.action.__class__ !=
+                                 SweepElectrodesAction):
             options.action = SweepElectrodesAction()
         if sweep_electrodes:
             self._update_feedback_options(options)
@@ -785,8 +788,7 @@ class FeedbackOptionsController():
         self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
-                    interface=IPlugin
-        )
+                    interface=IPlugin)
 
     def on_textentry_increase_voltage_focus_out_event(self, widget, event):
         """
@@ -816,21 +818,18 @@ class FeedbackOptionsController():
         app_values = self.plugin.get_app_values()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
-        if (app_values['use_force_normalization'] and
-            self.plugin.control_board.calibration and
-            self.plugin.control_board.calibration._c_drop
-        ):
+        if app_values['use_force_normalization'] and \
+            (self.plugin.control_board.calibration and
+             self.plugin.control_board.calibration._c_drop):
             options.action.increase_force = textentry_validate(
                 widget, options.action.increase_force, float)
             options.action.increase_voltage = (
                 self.plugin.control_board.force_to_voltage(
                     all_options.force + options.action.increase_force,
-                    all_options.frequency
-                ) -
+                    all_options.frequency) -
                 self.plugin.control_board.force_to_voltage(
                     all_options.force,
-                    all_options.frequency
-                )
+                    all_options.frequency)
             )
         else:
             options.action.increase_voltage = textentry_validate(
@@ -838,8 +837,7 @@ class FeedbackOptionsController():
         self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
-                    interface=IPlugin
-        )
+                    interface=IPlugin)
 
     def on_textentry_max_repeats_focus_out_event(self, widget, event):
         """
@@ -1110,7 +1108,7 @@ class FeedbackOptionsController():
             emit_signal('on_step_options_changed',
                         [self.plugin.name, app.protocol.current_step_number],
                         interface=IPlugin)
-        except:
+        except Exception:
             widget.set_text(str(options.action.channels))
 
 
@@ -1188,9 +1186,9 @@ class FeedbackResultsController():
         self.checkbutton_normalize_by_area.set_sensitive(y_axis == "Impedance"
                                                          or y_axis ==
                                                          "Capacitance")
-        self.checkbutton_filter.set_sensitive(y_axis == "Impedance" or \
-                                              y_axis == "Capacitance" or \
-                                              y_axis == "Velocity" or \
+        self.checkbutton_filter.set_sensitive(y_axis == "Impedance" or
+                                              y_axis == "Capacitance" or
+                                              y_axis == "Velocity" or
                                               y_axis == "x-position")
         self.update_plot()
 
@@ -1336,8 +1334,9 @@ class FeedbackResultsController():
                         Z = results.Z_device()
                         if self.checkbutton_filter.get_active():
                             lines = self.axis.plot(results.time,
-                                results.Z_device(filter_order=3) / \
-                                normalization)
+                                                   results
+                                                   .Z_device(filter_order=3) /
+                                                   normalization)
                             c = matplotlib.colors.colorConverter.to_rgba(
                                 lines[0].get_c(), alpha=.2)
                             handles.append(lines[0])
@@ -1356,8 +1355,8 @@ class FeedbackResultsController():
                         C = results.capacitance()
                         if self.checkbutton_filter.get_active():
                             C_filtered = results.capacitance(filter_order=2)
-                            lines = self.axis.plot(results.time,
-                                C_filtered / normalization)
+                            lines = self.axis.plot(results.time, C_filtered /
+                                                   normalization)
                             handles.append(lines[0])
                             c = matplotlib.colors.colorConverter.to_rgba(
                                 lines[0].get_c(), alpha=.2)
@@ -1407,7 +1406,8 @@ class FeedbackResultsController():
                         x_pos = results.x_position()
                         if self.checkbutton_filter.get_active():
                             lines = self.axis.plot(results.time,
-                                results.x_position(filter_order=3))
+                                                   results
+                                                   .x_position(filter_order=3))
                             handles.append(lines[0])
                             c = matplotlib.colors.colorConverter.to_rgba(
                                 lines[0].get_c(), alpha=.2)
@@ -1619,7 +1619,7 @@ class FeedbackCalibrationController():
             elif 'FeedbackResultsSeries' in selected_data[0][self.plugin.name]:
                 calibration = (selected_data[0][self.plugin.name]
                                ['FeedbackResultsSeries'].calibration)
-        except:
+        except Exception:
             logger.error("This step does not contain any calibration data.")
             return
 
@@ -1641,7 +1641,7 @@ class FeedbackCalibrationController():
                     break
                 else:
                     break
-            except:
+            except Exception:
                 logger.error("Error saving calibration file.", exc_info=True)
         dialog.destroy()
 
@@ -1670,7 +1670,7 @@ class FeedbackCalibrationController():
                     if str(calibration.__class__).split('.')[-1] != \
                             'FeedbackCalibration':
                         raise ValueError()
-                except:
+                except Exception:
                     logger.error('Not a valid calibration file.', exc_info=True)
         dialog.destroy()
 
@@ -1683,7 +1683,7 @@ class FeedbackCalibrationController():
                 elif 'FeedbackResultsSeries' in row[self.plugin.name]:
                     row[self.plugin.name]['FeedbackResultsSeries'].\
                         calibration = deepcopy(calibration)
-            except:
+            except Exception:
                 continue
         # save the experiment log with the new values
         filename = os.path.join(self.experiment_log_controller.results.
@@ -1875,7 +1875,7 @@ class FeedbackCalibrationController():
 
         try:
             hv_readings = pd.read_hdf(str(filename),
-                                        '/feedback/reference/measurements')
+                                      '/feedback/reference/measurements')
             fitted_params = pd.read_hdf(str(filename),
                                         '/feedback/reference/fitted_params')
 
@@ -1985,11 +1985,9 @@ class FeedbackCalibrationController():
 
         def on_calibrated(assistant):
             self.plugin.to_yaml(configurations_dir.joinpath(prefix +
-                                                            'config.yml')
-            )
-            view.to_hdf(calibrations_dir.joinpath(prefix +
-                                                  'calibration-device-load.h5')
-            )
+                                                            'config.yml'))
+            view.to_hdf(calibrations_dir
+                        .joinpath(prefix + 'calibration-device-load.h5'))
 
         # Save the persistent configuration settings from the control-board to
         # a file upon successful calibration.
