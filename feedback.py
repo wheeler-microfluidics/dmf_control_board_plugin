@@ -26,34 +26,36 @@ except ImportError:
     import pickle
 import warnings
 
-import yaml
-import tables
-import gtk
-import numpy as np
-import pandas as pd
-import matplotlib
-import matplotlib.mlab as mlab
-from matplotlib.figure import Figure
-from path_helpers import path
+from dmf_control_board_firmware import FeedbackResultsSeries
+from dmf_control_board_firmware.calibrate.hv_attenuator import \
+    plot_feedback_params
+from dmf_control_board_firmware.calibrate.impedance_benchmarks import \
+    plot_stat_summary
+from flatland.schema import String, Form
 from matplotlib.backends.backend_gtkagg import (FigureCanvasGTKAgg as
                                                 FigureCanvasGTK)
 from matplotlib.backends.backend_gtkagg import (NavigationToolbar2GTKAgg as
                                                 NavigationToolbar)
+from matplotlib.figure import Figure
+from microdrop.app_context import get_app
+from microdrop.plugin_helpers import get_plugin_info
+from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
+                                      get_service_instance_by_name)
 from microdrop_utility import SetOfInts, Version, FutureVersionError
 from microdrop_utility.gui import (textentry_validate,
                                    combobox_set_model_from_list,
-                                   combobox_get_active_text,
-                                   FormViewDialog)
-from flatland.schema import String, Form
-from microdrop.plugin_manager import (emit_signal, IWaveformGenerator, IPlugin,
-                                      get_service_instance_by_name)
-from microdrop.app_context import get_app
-from microdrop.plugin_helpers import get_plugin_info
-from dmf_control_board_firmware import FeedbackResultsSeries
-from dmf_control_board_firmware.calibrate.hv_attenuator import (
-    plot_feedback_params)
-from dmf_control_board_firmware.calibrate.impedance_benchmarks import (
-    plot_stat_summary)
+                                   combobox_get_active_text, FormViewDialog)
+from path_helpers import path
+from pygtkhelpers.gthreads import gtk_threadsafe
+import gobject
+import gtk
+import matplotlib
+import matplotlib.mlab as mlab
+import numpy as np
+import pandas as pd
+import tables
+import yaml
+
 from .wizards import (MicrodropImpedanceAssistantView,
                       MicrodropReferenceAssistantView)
 
@@ -63,6 +65,7 @@ logger = logging.getLogger(__name__)
 #
 # [1]: https://www.mail-archive.com/pytables-users@lists.sourceforge.net/msg01130.html
 warnings.simplefilter('ignore', tables.NaturalNameWarning)
+
 
 class AmplifierGainNotCalibrated(Exception):
     pass
@@ -246,8 +249,8 @@ class FeedbackOptions():
     @classmethod
     def from_dict(cls, options_dict):
         action = RetryAction(**options_dict['action'])
-        return FeedbackOptions(feedback_enabled=
-                               options_dict['feedback_enabled'], action=action)
+        return FeedbackOptions(feedback_enabled=options_dict
+                               ['feedback_enabled'], action=action)
 
 
 class FeedbackOptionsController():
@@ -263,7 +266,13 @@ class FeedbackOptionsController():
         self.initialized = False
 
     def on_plugin_enable(self):
-        if not self.initialized:
+        '''
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code blocks,
+            ensuring the code runs in the main GTK thread.
+        '''
+        @gtk_threadsafe
+        def _create_ui():
             app = get_app()
             self.feedback_options_menu_item = gtk.MenuItem("Feedback Options")
             self.plugin.control_board_menu.append(self
@@ -271,19 +280,25 @@ class FeedbackOptionsController():
             self.feedback_options_menu_item.connect("activate",
                                                     self.on_window_show)
             self.feedback_options_menu_item.show()
-            self.feedback_options_menu_item.set_sensitive(
-                app.dmf_device is not None)
+            self.feedback_options_menu_item.set_sensitive(app.dmf_device is
+                                                          not None)
             self.initialized = True
 
+        if not self.initialized:
+            _create_ui()
+
     def on_plugin_disable(self):
-        #self.measure_cap_filler_menu_item.hide()
-        #self.measure_cap_liquid_menu_item.hide()
         pass
 
+    @gtk_threadsafe
     def on_window_show(self, widget, data=None):
         """
         Handler called when the user clicks on "Feedback Options" in the
         "Tools" menu.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         options = self.plugin.get_step_options().feedback_options
         self._set_gui_sensitive(options)
@@ -293,19 +308,25 @@ class FeedbackOptionsController():
     def on_window_delete_event(self, widget, data=None):
         """
         Handler called when the user closes the "Feedback Options" window.
+
+        .. versionchanged:: 2.3.2
+            Schedule GTK call to run in the main GTK thread.
         """
-        self.window.hide()
+        gobject.idle_add(self.window.hide)
         return True
 
     def measure_cap_filler(self):
         '''
         Returns
         -------
+        dict
+            Calibration capacitance measurements data:
 
-            (dict) : The `'frequency'` item is a list of the frequencies
-                capacitance was measured at, and the `'capacitance'` item is a
-                list of the corresponding capacitance measurement at each
-                frequency.
+                frequency : list
+                    List of the frequencies capacitance was measured at.
+                capacitance : list
+                    List of the corresponding capacitance measurement at each
+                    frequency.
         '''
         c = self.measure_device_capacitance()
         self.plugin.control_board.calibration._c_filler = c
@@ -316,11 +337,14 @@ class FeedbackOptionsController():
         '''
         Returns
         -------
+        dict
+            Calibration capacitance measurements data:
 
-            (dict) : The `'frequency'` item is a list of the frequencies
-                capacitance was measured at, and the `'capacitance'` item is a
-                list of the corresponding capacitance measurement at each
-                frequency.
+                frequency : list
+                    List of the frequencies capacitance was measured at.
+                capacitance : list
+                    List of the corresponding capacitance measurement at each
+                    frequency.
         '''
         c = self.measure_device_capacitance()
         self.plugin.control_board.calibration._c_drop = c
@@ -340,8 +364,8 @@ class FeedbackOptionsController():
                 list of the corresponding capacitance measurement at each
                 frequency.
         '''
-        if (self.plugin.control_board is None or not
-            self.plugin.control_board.connected()):
+        if self.plugin.control_board is None or \
+                not self.plugin.control_board.connected():
             raise IOError('Not connected to control board.')
 
         app = get_app()
@@ -367,8 +391,7 @@ class FeedbackOptionsController():
         test_options = deepcopy(dmf_options)
         test_options.duration = 5 * app_values['sampling_window_ms']
         test_options.feedback_options = FeedbackOptions(
-            feedback_enabled=True, action=SweepFrequencyAction()
-        )
+            feedback_enabled=True, action=SweepFrequencyAction())
 
         results = FeedbackResultsSeries('Frequency')
         for frequency in np.logspace(
@@ -390,18 +413,15 @@ class FeedbackOptionsController():
             results.add_data(frequency, data)
             results.area = area
             capacitance = np.mean(data.capacitance())
-            logger.info('\tcapacitance = %e F (%e F/mm^2)' % (capacitance,
-                                                              capacitance /
-                                                              area))
+            logger.info('\tcapacitance = %e F (%e F/mm^2)', capacitance,
+                        capacitance / area)
 
         capacitance = np.mean(results.capacitance())
-        logger.info('mean(capacitance) = %e F (%e F/mm^2)' % (capacitance,
-                                                              capacitance /
-                                                              area))
+        logger.info('mean(capacitance) = %e F (%e F/mm^2)', capacitance,
+                    capacitance / area)
 
         # set the frequency back to it's original state
-        emit_signal("set_frequency",
-                    dmf_options.frequency,
+        emit_signal("set_frequency", dmf_options.frequency,
                     interface=IWaveformGenerator)
         self.plugin.check_impedance(dmf_options)
 
@@ -430,10 +450,9 @@ class FeedbackOptionsController():
     def _update_feedback_options(self, feedback_options):
         app = get_app()
         # copy the current step's feedback options to all selected steps
-        pgc = get_service_instance_by_name(
-            'microdrop.gui.protocol_grid_controller',
-            env='microdrop'
-        )
+        pgc = get_service_instance_by_name('microdrop.gui'
+                                           '.protocol_grid_controller',
+                                           env='microdrop')
         for step_number in pgc.widget.selected_ids:
             if step_number == app.protocol.current_step_number:
                 continue
@@ -446,54 +465,71 @@ class FeedbackOptionsController():
                         interface=IPlugin)
 
     def on_step_options_changed(self, plugin_name, step_number):
+        '''
+        .. versionchanged:: 2.3.3
+            Add note indicating UI calls are thread-safe.
+        '''
         app = get_app()
         app_values = self.plugin.get_app_values()
         options = self.plugin.get_step_options(step_number)
         feedback_options = options.feedback_options
 
-        if (feedback_options.action.__class__ ==  RetryAction and
-            app_values['use_force_normalization'] and
-            self.plugin.control_board.calibration and
-            self.plugin.control_board.calibration._c_drop
-        ):
+        if feedback_options.action.__class__ == RetryAction and \
+            (app_values['use_force_normalization'] and
+             self.plugin.control_board.calibration and
+             self.plugin.control_board.calibration._c_drop):
             feedback_options.action.increase_voltage = (
                 self.plugin.control_board.force_to_voltage(
                     options.force + feedback_options.action.increase_force,
-                    options.frequency
-                ) -
-                self.plugin.control_board.force_to_voltage(
-                    options.force,
-                    options.frequency
-                )
-            )
-        if (self.plugin.name == plugin_name and
-            app.protocol.current_step_number == step_number
-        ):
+                    options.frequency) -
+                self.plugin.control_board.force_to_voltage(options.force,
+                                                           options.frequency))
+
+        if self.plugin.name == plugin_name and \
+                app.protocol.current_step_number == step_number:
+            # **Note** The following methods are thread-safe.
             self._set_gui_sensitive(feedback_options)
             self._update_gui_state(feedback_options)
 
     def on_app_options_changed(self, plugin_name):
+        '''
+        .. versionchanged:: 2.3.3
+            Use :func:`gtk_threadsafe` decorator to wrap GTK code blocks,
+            ensuring the code runs in the main GTK thread.
+        '''
         if self.plugin.name == plugin_name:
             app = get_app()
             app_values = self.plugin.get_app_values()
-            if (app_values['use_force_normalization'] and
-                self.plugin.control_board.calibration and
-                self.plugin.control_board.calibration._c_drop
-            ):
-                self.builder.get_object("label_increase_voltage")\
-                    .set_text('Increase force by:')
-                self.builder.get_object("label_increase_voltage_units")\
-                    .set_text(u'\u03BCN/mm/repeat')
+
+            if app_values['use_force_normalization'] and \
+                (self.plugin.control_board.calibration and
+                 self.plugin.control_board.calibration._c_drop):
+                message = 'Increase force by:'
+                units = u'\u03BCN/mm/repeat'
             else:
+                message = 'Increase voltage by:'
+                units = 'V/repeat'
+
+            @gtk_threadsafe
+            def _update_ui():
                 self.builder.get_object("label_increase_voltage")\
-                    .set_text('Increase voltage by:')
+                    .set_text(message)
                 self.builder.get_object("label_increase_voltage_units")\
-                    .set_text('V/repeat')
+                    .set_text(units)
+
+            _update_ui()
+
             if app.protocol:
                 options = self.plugin.get_step_options().feedback_options
                 self._update_gui_state(options)
 
+    @gtk_threadsafe
     def _update_gui_state(self, options):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         app_values = self.plugin.get_app_values()
 
         # update the state of the "Feedback enabled" check button
@@ -514,10 +550,9 @@ class FeedbackOptionsController():
             self.builder.get_object("textentry_percent_threshold")\
                 .set_text(str(options.action.percent_threshold))
 
-            if (app_values['use_force_normalization'] and
-                self.plugin.control_board.calibration and
-                self.plugin.control_board.calibration._c_drop
-            ):
+            if app_values['use_force_normalization'] and \
+                (self.plugin.control_board.calibration and
+                 self.plugin.control_board.calibration._c_drop):
                 self.builder.get_object("textentry_increase_voltage")\
                     .set_text(str(options.action.increase_force))
             else:
@@ -598,7 +633,13 @@ class FeedbackOptionsController():
             button.handler_unblock_by_func(
                 self.on_radiobutton_sweep_electrodes_toggled)
 
+    @gtk_threadsafe
     def _set_gui_sensitive(self, options):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         self.builder.get_object("radiobutton_retry")\
             .set_sensitive(options.feedback_enabled)
         self.builder.get_object("radiobutton_sweep_frequency")\
@@ -641,8 +682,8 @@ class FeedbackOptionsController():
         Handler called when the "Retry until capacitance..." radio button is
         toggled.
         """
-        logger.debug('retry was toggled %s' % (('OFF',
-                                                'ON')[widget.get_active()]))
+        logger.debug('retry was toggled %s',
+                     ('OFF', 'ON')[widget.get_active()])
         app = get_app()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
@@ -666,8 +707,8 @@ class FeedbackOptionsController():
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
         sweep_frequency = widget.get_active()
-        if (sweep_frequency and options.action.__class__ !=
-                SweepFrequencyAction):
+        if sweep_frequency and (options.action.__class__ !=
+                                SweepFrequencyAction):
             options.action = SweepFrequencyAction()
         if sweep_frequency:
             self._update_feedback_options(options)
@@ -705,8 +746,8 @@ class FeedbackOptionsController():
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
         sweep_electrodes = widget.get_active()
-        if (sweep_electrodes and options.action.__class__ !=
-                SweepElectrodesAction):
+        if sweep_electrodes and (options.action.__class__ !=
+                                 SweepElectrodesAction):
             options.action = SweepElectrodesAction()
         if sweep_electrodes:
             self._update_feedback_options(options)
@@ -731,9 +772,14 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_percent_threshold_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_percent_threshold_changed(self, widget):
         """
         Update the percent threshold value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         options = self.plugin.get_step_options().feedback_options
@@ -742,8 +788,7 @@ class FeedbackOptionsController():
         self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
-                    interface=IPlugin
-        )
+                    interface=IPlugin)
 
     def on_textentry_increase_voltage_focus_out_event(self, widget, event):
         """
@@ -760,29 +805,31 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_increase_voltage_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_increase_voltage_changed(self, widget):
         """
         Update the increase voltage value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         app_values = self.plugin.get_app_values()
         all_options = self.plugin.get_step_options()
         options = all_options.feedback_options
-        if (app_values['use_force_normalization'] and
-            self.plugin.control_board.calibration and
-            self.plugin.control_board.calibration._c_drop
-        ):
+        if app_values['use_force_normalization'] and \
+            (self.plugin.control_board.calibration and
+             self.plugin.control_board.calibration._c_drop):
             options.action.increase_force = textentry_validate(
                 widget, options.action.increase_force, float)
             options.action.increase_voltage = (
                 self.plugin.control_board.force_to_voltage(
                     all_options.force + options.action.increase_force,
-                    all_options.frequency
-                ) -
+                    all_options.frequency) -
                 self.plugin.control_board.force_to_voltage(
                     all_options.force,
-                    all_options.frequency
-                )
+                    all_options.frequency)
             )
         else:
             options.action.increase_voltage = textentry_validate(
@@ -790,8 +837,7 @@ class FeedbackOptionsController():
         self._update_feedback_options(options)
         emit_signal('on_step_options_changed',
                     [self.plugin.name, app.protocol.current_step_number],
-                    interface=IPlugin
-        )
+                    interface=IPlugin)
 
     def on_textentry_max_repeats_focus_out_event(self, widget, event):
         """
@@ -808,9 +854,14 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_max_repeats_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_max_repeats_changed(self, widget):
         """
         Update the max repeats value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         all_options = self.plugin.get_step_options()
@@ -837,9 +888,14 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_start_frequency_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_start_frequency_changed(self, widget):
         """
         Update the start frequency value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         all_options = self.plugin.get_step_options()
@@ -866,9 +922,14 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_end_frequency_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_end_frequency_changed(self, widget):
         """
         Update the end frequency value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         all_options = self.plugin.get_step_options()
@@ -896,9 +957,14 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_n_frequency_steps_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_n_frequency_steps_changed(self, widget):
         """
         Update the number of frequency steps value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         all_options = self.plugin.get_step_options()
@@ -925,9 +991,14 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_start_voltage_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_start_voltage_changed(self, widget):
         """
         Update the start voltage value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         all_options = self.plugin.get_step_options()
@@ -954,9 +1025,14 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_end_voltage_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_end_voltage_changed(self, widget):
         """
         Update the end voltage value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         all_options = self.plugin.get_step_options()
@@ -983,9 +1059,14 @@ class FeedbackOptionsController():
         if event.keyval == 65293:  # user pressed enter
             self.on_textentry_n_voltage_steps_changed(widget)
 
+    @gtk_threadsafe
     def on_textentry_n_voltage_steps_changed(self, widget):
         """
         Update the number of voltage steps value for the current step.
+
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
         """
         app = get_app()
         all_options = self.plugin.get_step_options()
@@ -1027,7 +1108,7 @@ class FeedbackOptionsController():
             emit_signal('on_step_options_changed',
                         [self.plugin.name, app.protocol.current_step_number],
                         interface=IPlugin)
-        except:
+        except Exception:
             widget.set_text(str(options.action.channels))
 
 
@@ -1105,9 +1186,9 @@ class FeedbackResultsController():
         self.checkbutton_normalize_by_area.set_sensitive(y_axis == "Impedance"
                                                          or y_axis ==
                                                          "Capacitance")
-        self.checkbutton_filter.set_sensitive(y_axis == "Impedance" or \
-                                              y_axis == "Capacitance" or \
-                                              y_axis == "Velocity" or \
+        self.checkbutton_filter.set_sensitive(y_axis == "Impedance" or
+                                              y_axis == "Capacitance" or
+                                              y_axis == "Velocity" or
                                               y_axis == "x-position")
         self.update_plot()
 
@@ -1155,7 +1236,13 @@ class FeedbackResultsController():
         self.data = data
         self.update_plot()
 
+    @gtk_threadsafe
     def update_plot(self):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         x_axis = combobox_get_active_text(self.combobox_x_axis)
         y_axis = combobox_get_active_text(self.combobox_y_axis)
         self.axis.cla()
@@ -1247,8 +1334,9 @@ class FeedbackResultsController():
                         Z = results.Z_device()
                         if self.checkbutton_filter.get_active():
                             lines = self.axis.plot(results.time,
-                                results.Z_device(filter_order=3) / \
-                                normalization)
+                                                   results
+                                                   .Z_device(filter_order=3) /
+                                                   normalization)
                             c = matplotlib.colors.colorConverter.to_rgba(
                                 lines[0].get_c(), alpha=.2)
                             handles.append(lines[0])
@@ -1267,8 +1355,8 @@ class FeedbackResultsController():
                         C = results.capacitance()
                         if self.checkbutton_filter.get_active():
                             C_filtered = results.capacitance(filter_order=2)
-                            lines = self.axis.plot(results.time,
-                                C_filtered / normalization)
+                            lines = self.axis.plot(results.time, C_filtered /
+                                                   normalization)
                             handles.append(lines[0])
                             c = matplotlib.colors.colorConverter.to_rgba(
                                 lines[0].get_c(), alpha=.2)
@@ -1318,7 +1406,8 @@ class FeedbackResultsController():
                         x_pos = results.x_position()
                         if self.checkbutton_filter.get_active():
                             lines = self.axis.plot(results.time,
-                                results.x_position(filter_order=3))
+                                                   results
+                                                   .x_position(filter_order=3))
                             handles.append(lines[0])
                             c = matplotlib.colors.colorConverter.to_rgba(
                                 lines[0].get_c(), alpha=.2)
@@ -1510,7 +1599,13 @@ class FeedbackCalibrationController():
         self.experiment_log_controller = get_service_instance_by_name(
             "microdrop.gui.experiment_log_controller", "microdrop")
 
+    @gtk_threadsafe
     def on_save_log_calibration(self, widget, data=None):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         selected_data = self.experiment_log_controller.get_selected_data()
         calibration = None
         if len(selected_data) > 1:
@@ -1524,7 +1619,7 @@ class FeedbackCalibrationController():
             elif 'FeedbackResultsSeries' in selected_data[0][self.plugin.name]:
                 calibration = (selected_data[0][self.plugin.name]
                                ['FeedbackResultsSeries'].calibration)
-        except:
+        except Exception:
             logger.error("This step does not contain any calibration data.")
             return
 
@@ -1546,19 +1641,23 @@ class FeedbackCalibrationController():
                     break
                 else:
                     break
-            except:
+            except Exception:
                 logger.error("Error saving calibration file.", exc_info=True)
         dialog.destroy()
 
+    @gtk_threadsafe
     def on_load_log_calibration(self, widget, data=None):
-        dialog = gtk.FileChooserDialog(
-            title="Load calibration from file",
-            action=gtk.FILE_CHOOSER_ACTION_OPEN,
-            buttons=(gtk.STOCK_CANCEL,
-                     gtk.RESPONSE_CANCEL,
-                     gtk.STOCK_OPEN,
-                     gtk.RESPONSE_OK)
-        )
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
+        dialog = gtk.FileChooserDialog(title="Load calibration from file",
+                                       action=gtk.FILE_CHOOSER_ACTION_OPEN,
+                                       buttons=(gtk.STOCK_CANCEL,
+                                                gtk.RESPONSE_CANCEL,
+                                                gtk.STOCK_OPEN,
+                                                gtk.RESPONSE_OK))
         dialog.set_default_response(gtk.RESPONSE_OK)
         response = dialog.run()
         calibration = None
@@ -1571,7 +1670,7 @@ class FeedbackCalibrationController():
                     if str(calibration.__class__).split('.')[-1] != \
                             'FeedbackCalibration':
                         raise ValueError()
-                except:
+                except Exception:
                     logger.error('Not a valid calibration file.', exc_info=True)
         dialog.destroy()
 
@@ -1584,7 +1683,7 @@ class FeedbackCalibrationController():
                 elif 'FeedbackResultsSeries' in row[self.plugin.name]:
                     row[self.plugin.name]['FeedbackResultsSeries'].\
                         calibration = deepcopy(calibration)
-            except:
+            except Exception:
                 continue
         # save the experiment log with the new values
         filename = os.path.join(self.experiment_log_controller.results.
@@ -1595,7 +1694,13 @@ class FeedbackCalibrationController():
         self.experiment_log_controller.results.log.save(filename)
         emit_signal("on_experiment_log_selection_changed", [selected_data])
 
+    @gtk_threadsafe
     def on_edit_log_calibration(self, widget, data=None):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         logger.debug("on_edit_log_calibration()")
         settings = {}
         schema_entries = []
@@ -1744,7 +1849,13 @@ class FeedbackCalibrationController():
 
         self.calibrate_attenuators()
 
+    @gtk_threadsafe
     def load_reference_calibration(self):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         dialog = gtk.FileChooserDialog(
             title="Load reference calibration readings from file",
             action=gtk.FILE_CHOOSER_ACTION_OPEN,
@@ -1764,7 +1875,7 @@ class FeedbackCalibrationController():
 
         try:
             hv_readings = pd.read_hdf(str(filename),
-                                        '/feedback/reference/measurements')
+                                      '/feedback/reference/measurements')
             fitted_params = pd.read_hdf(str(filename),
                                         '/feedback/reference/fitted_params')
 
@@ -1791,7 +1902,13 @@ class FeedbackCalibrationController():
             logger.error('Error loading reference calibration data.')
             return
 
+    @gtk_threadsafe
     def load_impedance_calibration(self):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         dialog = gtk.FileChooserDialog(
             title="Load device load calibration readings from file",
             action=gtk.FILE_CHOOSER_ACTION_OPEN,
@@ -1831,7 +1948,13 @@ class FeedbackCalibrationController():
             logger.error('Error loading device load calibration data.')
             return
 
+    @gtk_threadsafe
     def calibrate_attenuators(self):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         calibrations_dir = self.plugin.calibrations_dir()
         configurations_dir = self.plugin.configurations_dir()
         prefix = self.plugin._file_prefix()
@@ -1839,19 +1962,22 @@ class FeedbackCalibrationController():
 
         def on_calibrated(assistant):
             self.plugin.to_yaml(configurations_dir.joinpath(prefix +
-                                                            'config.yml')
-            )
-            view.to_hdf(
-                calibrations_dir.joinpath(prefix +
-                                          'calibration-reference-load.h5')
-            )
+                                                            'config.yml'))
+            view.to_hdf(calibrations_dir
+                        .joinpath(prefix + 'calibration-reference-load.h5'))
 
         # Save the persistent configuration settings from the control-board to
         # a file upon successful calibration.
         view.widget.connect('close', on_calibrated)
         view.show()
 
+    @gtk_threadsafe
     def calibrate_impedance(self):
+        '''
+        .. versionchanged:: 2.3.3
+            Wrap with :func:`gtk_threadsafe` decorator to ensure the code runs
+            in the main GTK thread.
+        '''
         calibrations_dir = self.plugin.calibrations_dir()
         configurations_dir = self.plugin.configurations_dir()
         prefix = self.plugin._file_prefix()
@@ -1859,11 +1985,9 @@ class FeedbackCalibrationController():
 
         def on_calibrated(assistant):
             self.plugin.to_yaml(configurations_dir.joinpath(prefix +
-                                                            'config.yml')
-            )
-            view.to_hdf(calibrations_dir.joinpath(prefix +
-                                                  'calibration-device-load.h5')
-            )
+                                                            'config.yml'))
+            view.to_hdf(calibrations_dir
+                        .joinpath(prefix + 'calibration-device-load.h5'))
 
         # Save the persistent configuration settings from the control-board to
         # a file upon successful calibration.
